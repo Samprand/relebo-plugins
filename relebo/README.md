@@ -6,7 +6,7 @@ Claude Code session.
 ## Install (from Claude Code — the only supported path)
 
 ```bash
-claude plugin marketplace add https://<your-engine>/marketplace.json
+claude plugin marketplace add Samprand/relebo-plugins
 claude plugin install relebo@relebo
 ```
 

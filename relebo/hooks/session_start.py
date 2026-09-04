@@ -69,6 +69,7 @@ def main() -> None:
         _client.save_session(claude_session_id, session["run_id"], mode)
         _client.cache_renders(session["renders"])
         _client.flush_spool(claude_session_id, session["run_id"])
+        _client.close_orphans(claude_session_id)
         context = _context(session["renders"], stale=False, mode=mode)
     else:
         context = _context(_client.cached_renders(), stale=True, mode=mode)

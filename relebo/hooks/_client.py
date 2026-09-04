@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -16,6 +17,7 @@ _SESSIONS_DIR = _RELEBO_DIR / "sessions"
 _SPOOL_DIR = _RELEBO_DIR / "spool"
 _RENDER_CACHE_DIR = _RELEBO_DIR / "render-cache"
 
+_ORPHAN_IDLE_S = 2 * 60 * 60
 _TIMEOUT_S = 8
 SHADOW = "shadow"
 ENFORCE = "enforce"
@@ -88,6 +90,34 @@ def save_session(claude_session_id: str, run_id: int, mode: str) -> None:
     )
 
 
+def touch_session(claude_session_id: str) -> None:
+    path = _SESSIONS_DIR / f"{claude_session_id}.json"
+    if path.exists():
+        os.utime(path)
+
+
+def close_orphans(current_session_id: str) -> None:
+    """A device that powers off never fires SessionEnd: its sessions stay open on the
+    engine until the next start here closes them. Activity age is the only signal that
+    separates an orphan from a parallel session still in use — never close a recent one."""
+    if not _SESSIONS_DIR.exists():
+        return
+    now = time.time()
+    for path in _SESSIONS_DIR.glob("*.json"):
+        session_id = path.stem
+        if session_id == current_session_id:
+            continue
+        if now - path.stat().st_mtime < _ORPHAN_IDLE_S:
+            continue
+        run_id = _session(session_id).get("run_id")
+        if run_id is None:
+            path.unlink()
+            continue
+        flush_spool(session_id, run_id)
+        if post(f"/machine/sessions/{run_id}/close", {}) is not None:
+            path.unlink()
+
+
 def spool_event(claude_session_id: str, event: dict) -> None:
     _SPOOL_DIR.mkdir(parents=True, exist_ok=True)
     with (_SPOOL_DIR / f"{claude_session_id}.jsonl").open("a") as spool:
@@ -111,6 +141,7 @@ def flush_spool(claude_session_id: str, run_id: int) -> None:
 
 
 def record_event(claude_session_id: str, kind: str, turn_key: str, payload: dict) -> None:
+    touch_session(claude_session_id)
     event = {"kind": kind, "turn_key": turn_key, "payload": payload}
     run_id = session_run_id(claude_session_id)
     if run_id is None or post(f"/machine/sessions/{run_id}/events", event) is None:
@@ -121,8 +152,13 @@ def record_event(claude_session_id: str, kind: str, turn_key: str, payload: dict
 
 def cache_renders(renders: list[dict]) -> None:
     _RENDER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # The engine hands over the full set each session: stale files from an earlier key
+    # layout or a left workspace must not resurface as extra renders.
+    for stale in _RENDER_CACHE_DIR.glob("*.json"):
+        stale.unlink()
     for render in renders:
-        name = f"{render['scope']}-{render['workspace_id']}"
+        kind = render.get("kind") or "rubric"
+        name = f"{render['scope']}-{render['workspace_id']}-{kind}"
         (_RENDER_CACHE_DIR / f"{name}.json").write_text(json.dumps(render))
 
 
