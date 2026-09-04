@@ -1,0 +1,13 @@
+{
+  "name": "relebo",
+  "owner": {
+    "name": "Samprand"
+  },
+  "plugins": [
+    {
+      "name": "relebo",
+      "description": "Relebo from Claude Code: workflows, inbox and workspace knowledge through the Relebo engine.",
+      "source": "./relebo"
+    }
+  ]
+}
