@@ -1,7 +1,7 @@
 {
   "name": "relebo",
   "displayName": "Relebo",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Relebo from Claude Code: workflows, inbox and workspace knowledge through the Relebo engine.",
   "author": {
     "name": "Samprand"
