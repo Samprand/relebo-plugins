@@ -17,6 +17,10 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
    asked to keep, with the subject they named (or propose one and confirm).
 5. Knowledge read from Relebo may be stale or perishable — treat it as context, not ground
    truth, and say where it came from.
+6. Relebo distills knowledge from every session by default. When the user says this
+   session must not be kept (a test, a throwaway client integration, "no guardes nada de
+   esto"), call `relebo_pause_capture` right away — before doing anything else — and
+   confirm it. It is per session and cannot be undone.
 
 ## Typical flows
 
@@ -25,3 +29,5 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
 - "guarda esto en el conocimiento del equipo" → confirm subject + kind, then
   `relebo_save_knowledge`.
 - "¿qué sabemos de X?" → `relebo_knowledge_subjects` → `relebo_knowledge_pieces`.
+- "esto es una prueba, no lo guardes" / "fast integration para un cliente, sin memoria" →
+  `relebo_pause_capture` immediately, then continue with the task.

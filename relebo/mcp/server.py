@@ -14,6 +14,7 @@ import httpx
 from mcp.server.mcpserver import MCPServer
 
 _STATE_PATH = Path.home() / ".relebo" / "machine.json"
+_SESSIONS_DIR = Path.home() / ".relebo" / "sessions"
 _state: dict = {}
 if _STATE_PATH.exists():
     _state = json.loads(_STATE_PATH.read_text())
@@ -112,6 +113,30 @@ def relebo_save_knowledge(workspace_id: int, subject: str, content: str, kind: s
         f"/workspaces/{workspace_id}/knowledge",
         {"subject": subject, "content": content, "kind": kind},
     )
+
+
+@mcp.tool()
+def relebo_pause_capture() -> object:
+    """Stop Relebo from saving knowledge out of the current Claude Code session — call it
+    the moment the user says this session must not be kept (a test, a throwaway client
+    integration). Irreversible for the session; earlier captures stay."""
+    sessions = sorted(
+        (
+            path
+            for path in _SESSIONS_DIR.glob("*.json")
+            if not path.name.endswith(".cursor.json")
+        ),
+        key=lambda path: path.stat().st_mtime,
+    )
+    if not sessions:
+        return {"error": "no Relebo session on this machine — is the relebo plugin active?"}
+    # The prompt hook touched the current session's file an instant ago: newest wins.
+    current = sessions[-1]
+    run_id = json.loads(current.read_text()).get("run_id")
+    if run_id is None:
+        return {"error": "the current session has no engine run — capture was never on"}
+    result = _request("POST", f"/machine/sessions/{run_id}/capture/pause", {})
+    return {"run_id": run_id, "paused": True, "engine": result}
 
 
 if __name__ == "__main__":

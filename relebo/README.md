@@ -42,6 +42,7 @@ claude plugin uninstall relebo@relebo
 | `relebo_answer_inbox` | Approve/reject a pending entry |
 | `relebo_knowledge_subjects` / `relebo_knowledge_pieces` | Read knowledge |
 | `relebo_save_knowledge` | Save knowledge |
+| `relebo_pause_capture` | Stop saving knowledge from the current session |
 
 Auth order: machine identity (`~/.relebo/machine.json`, never expires) →
 `RELEBO_TOKEN` (session token, ~1h). Local development without the
