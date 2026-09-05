@@ -1,7 +1,7 @@
 {
   "name": "relebo",
   "displayName": "Relebo",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Relebo from Claude Code: workflows, inbox and workspace knowledge through the Relebo engine.",
   "author": {
     "name": "Samprand"
@@ -22,6 +22,11 @@
       "type": "string",
       "title": "Gate mode",
       "description": "shadow (judge and report, never block) or enforce. Default: shadow."
+    },
+    "rubric_context": {
+      "type": "string",
+      "title": "Rubric context",
+      "description": "index (one line per rule at start; the sections and facts each turn needs arrive with every prompt) or full (whole rubric + facts at session start). Default: index."
     }
   },
   "mcpServers": {

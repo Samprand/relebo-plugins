@@ -139,5 +139,22 @@ def relebo_pause_capture() -> object:
     return {"run_id": run_id, "paused": True, "engine": result}
 
 
+@mcp.tool()
+def relebo_recall(query: str) -> object:
+    """Pull the coding rules and project facts that a piece of work calls for — call it
+    before touching an area of the project you have not read rules or facts about in
+    this session. query: what you are about to do, in plain words."""
+    sessions = sorted(
+        (p for p in _SESSIONS_DIR.glob("*.json") if not p.name.endswith(".cursor.json")),
+        key=lambda p: p.stat().st_mtime,
+    )
+    if not sessions:
+        return {"error": "no Relebo session on this machine — is the relebo plugin active?"}
+    run_id = json.loads(sessions[-1].read_text()).get("run_id")
+    if run_id is None:
+        return {"error": "the current session has no engine run"}
+    return _request("POST", f"/machine/sessions/{run_id}/recall", {"query": query, "prompt": query})
+
+
 if __name__ == "__main__":
     mcp.run()

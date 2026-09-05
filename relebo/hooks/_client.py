@@ -22,6 +22,9 @@ _TIMEOUT_S = 8
 SHADOW = "shadow"
 ENFORCE = "enforce"
 _GATE_MODE_DEFAULT = SHADOW
+RUBRIC_FULL = "full"
+RUBRIC_INDEX = "index"
+_RUBRIC_CONTEXT_DEFAULT = RUBRIC_INDEX
 
 
 def _state() -> dict:
@@ -45,6 +48,12 @@ def machine_key() -> str:
 
 def gate_mode() -> str:
     return os.environ.get("CLAUDE_PLUGIN_OPTION_GATE_MODE") or _GATE_MODE_DEFAULT
+
+
+def rubric_context() -> str:
+    """full: the whole rubric and the facts block at session start. index: a one-line
+    index per rule at start, the sections and facts each turn calls for on every prompt."""
+    return os.environ.get("CLAUDE_PLUGIN_OPTION_RUBRIC_CONTEXT") or _RUBRIC_CONTEXT_DEFAULT
 
 
 def post(path: str, body: dict, timeout: float = _TIMEOUT_S) -> dict | None:
