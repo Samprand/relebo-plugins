@@ -90,6 +90,20 @@ def save_session(claude_session_id: str, run_id: int, mode: str) -> None:
     )
 
 
+def save_turn_base(claude_session_id: str, base: dict) -> None:
+    """Where the current turn starts in the working tree: the gate diffs against it."""
+    path = _SESSIONS_DIR / f"{claude_session_id}.json"
+    if not path.exists():
+        return
+    state = _session(claude_session_id)
+    state["turn_base"] = base
+    path.write_text(json.dumps(state))
+
+
+def turn_base(claude_session_id: str) -> dict:
+    return _session(claude_session_id).get("turn_base") or {}
+
+
 def touch_session(claude_session_id: str) -> None:
     path = _SESSIONS_DIR / f"{claude_session_id}.json"
     if path.exists():

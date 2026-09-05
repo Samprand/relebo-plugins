@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -20,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _client  # noqa: E402
+import _git  # noqa: E402
 import _guards  # noqa: E402
 
 _CURSOR_DIR = Path.home() / ".relebo" / "sessions"
@@ -28,7 +28,6 @@ _MAX_PROMPT_CHARS = 4000
 _MAX_RECEIPT_CHARS = 300
 _MAX_BLOCKS_PER_TURN = 3
 _GATE_TIMEOUT_S = 90
-_GIT_TIMEOUT_S = 5
 _MAX_FILES = 12
 _MAX_FILE_CHARS = 6000
 _MAX_TOTAL_FILE_CHARS = 40000
@@ -162,16 +161,6 @@ def _read_delta(transcript_path: str, since_line: int) -> tuple[dict, int]:
     return delta, len(lines)
 
 
-def _git(root: str, *args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", root, *args], capture_output=True, text=True, timeout=_GIT_TIMEOUT_S
-        )
-        return result.stdout if result.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
 def _head(path: str) -> str:
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
@@ -180,15 +169,19 @@ def _head(path: str) -> str:
         return ""
 
 
-def _collect_files(touched: dict[str, str], cwd: str, turn_start: float) -> tuple[list[dict], list[str]]:
-    """Post-state evidence: every file this turn touched, as a diff against HEAD
-    or the head of a new file. Git status adds what subagents edited — their
-    transcripts are not ours — filtered by mtime so pre-existing dirt stays out."""
-    root = _git(cwd, "rev-parse", "--show-toplevel").strip() if cwd else ""
+def _collect_files(
+    touched: dict[str, str], cwd: str, turn_start: float, base: dict
+) -> tuple[list[dict], list[str]]:
+    """Post-state evidence: every file this turn touched, as a diff against the
+    snapshot taken when the turn started (HEAD only when there is none) or the head
+    of a new file. Git status adds what subagents edited — their transcripts are not
+    ours — filtered by mtime so pre-existing dirt stays out."""
+    root = _git.run(cwd, "rev-parse", "--show-toplevel").strip() if cwd else ""
+    base_commit = base.get("commit", "") if base.get("root") == root else ""
     paths = dict(touched)
     untracked_set: set[str] = set()
     if root:
-        for line in _git(root, "status", "--porcelain", "--untracked-files=all").splitlines():
+        for line in _git.run(root, "status", "--porcelain", "--untracked-files=all").splitlines():
             rel = line[3:].split(" -> ")[-1].strip().strip('"')
             if not rel:
                 continue
@@ -216,7 +209,14 @@ def _collect_files(touched: dict[str, str], cwd: str, turn_start: float) -> tupl
         untracked = path in untracked_set or not inside_repo
         rel = os.path.relpath(path, root) if inside_repo else ""
         # No HEAD yet (fresh repo) → diff against the index instead.
-        diff = "" if untracked else (_git(root, "diff", "HEAD", "--", rel) or _git(root, "diff", "--", rel))
+        diff = (
+            ""
+            if untracked
+            else (
+                _git.run(root, "diff", base_commit or "HEAD", "--", rel)
+                or _git.run(root, "diff", "--", rel)
+            )
+        )
         body = (diff or _head(path))[:_MAX_FILE_CHARS]
         if len(body) > budget:
             omitted.append(path)
@@ -278,7 +278,12 @@ def main(payload: dict) -> None:
     blocks = cursor.get("blocks", 0) if retrying else 0
 
     guard_findings = _guards.run(delta, _cached_anchors())
-    files, omitted = _collect_files(delta["touched"], payload.get("cwd", ""), delta["turn_start"])
+    files, omitted = _collect_files(
+        delta["touched"],
+        payload.get("cwd", ""),
+        delta["turn_start"],
+        _client.turn_base(claude_session_id),
+    )
     verdict = _client.post(
         f"/machine/sessions/{run_id}/gate",
         {
@@ -318,6 +323,8 @@ def main(payload: dict) -> None:
         claude_session_id,
         {"line": line_count, "turn_line": since_line, "turn_key": turn_key, "blocks": 0},
     )
+    # The turn is delivered: the next one starts from the tree as it is now.
+    _client.save_turn_base(claude_session_id, _git.snapshot(payload.get("cwd", "")))
     if verdict is None:
         message = prefix + (f"; guards would block: {_findings_line(findings)}" if findings else ".")
         _receipt(message)
