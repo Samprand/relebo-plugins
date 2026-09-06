@@ -16,10 +16,6 @@ import _client  # noqa: E402
 import _git  # noqa: E402
 
 
-def _git_remote(cwd: str) -> str:
-    return _git.run(cwd, "remote", "get-url", "origin").strip() if cwd else ""
-
-
 _RENDER_RUBRIC = "rubric"
 _SECTION_RE = re.compile(r"^## \[([^\]]+)\]\n(?:_Applies when:_ (.*))?", re.MULTILINE)
 
@@ -73,22 +69,8 @@ def main() -> None:
     source = payload.get("source", "startup")
     mode = _client.gate_mode()
 
-    session = _client.post(
-        "/machine/sessions",
-        {
-            "claude_session_id": claude_session_id,
-            "cwd": cwd,
-            "git_remote": _git_remote(cwd),
-            "source": source,
-            "gate_mode": mode,
-        },
-    )
-
+    session = _client.open_session(claude_session_id, cwd, source)
     if session is not None:
-        _client.save_session(claude_session_id, session["run_id"], mode)
-        _client.save_turn_base(claude_session_id, _git.snapshot(cwd))
-        _client.cache_renders(session["renders"])
-        _client.flush_spool(claude_session_id, session["run_id"])
         _client.close_orphans(claude_session_id)
         context = _context(session["renders"], stale=False, mode=mode, project=session.get("project"))
     else:

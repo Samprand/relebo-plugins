@@ -20,6 +20,7 @@ def main() -> None:
     if not prompt.strip():
         return
     claude_session_id = payload.get("session_id", "")
+    _client.ensure_session(claude_session_id, payload.get("cwd", ""))
     _client.record_event(
         claude_session_id,
         "user_prompt",

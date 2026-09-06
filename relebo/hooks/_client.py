@@ -92,6 +92,41 @@ def session_gate_mode(claude_session_id: str) -> str:
     return _session(claude_session_id).get("gate_mode") or gate_mode()
 
 
+def open_session(claude_session_id: str, cwd: str, source: str) -> dict | None:
+    """Register the session as a run on the engine and remember it locally; None when
+    the engine is unreachable. The renders come back for the caller to inject."""
+    import _git  # noqa: PLC0415 — hooks share one flat directory
+
+    mode = gate_mode()
+    session = post(
+        "/machine/sessions",
+        {
+            "claude_session_id": claude_session_id,
+            "cwd": cwd,
+            "git_remote": _git.run(cwd, "remote", "get-url", "origin").strip() if cwd else "",
+            "source": source,
+            "gate_mode": mode,
+        },
+    )
+    if session is None:
+        return None
+    save_session(claude_session_id, session["run_id"], mode)
+    save_turn_base(claude_session_id, _git.snapshot(cwd))
+    cache_renders(session["renders"])
+    flush_spool(claude_session_id, session["run_id"])
+    return session
+
+
+def ensure_session(claude_session_id: str, cwd: str) -> int | None:
+    """The run for this session, reopening one when it was closed as an orphan while
+    the session sat idle: a live session is supervised until the user says otherwise."""
+    run_id = session_run_id(claude_session_id)
+    if run_id is not None:
+        return run_id
+    session = open_session(claude_session_id, cwd, "resume")
+    return session["run_id"] if session else None
+
+
 def save_session(claude_session_id: str, run_id: int, mode: str) -> None:
     _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     (_SESSIONS_DIR / f"{claude_session_id}.json").write_text(

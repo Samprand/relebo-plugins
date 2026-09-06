@@ -262,8 +262,12 @@ def _receipt(message: str) -> None:
 def main(payload: dict) -> None:
     claude_session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
-    run_id = _client.session_run_id(claude_session_id)
-    if run_id is None or not transcript_path or not Path(transcript_path).exists():
+    if not transcript_path or not Path(transcript_path).exists():
+        _receipt("Relebo supervisor — no transcript for this turn: unsupervised turn.")
+        return
+    run_id = _client.ensure_session(claude_session_id, payload.get("cwd", ""))
+    if run_id is None:
+        _receipt("Relebo supervisor unreachable — unsupervised turn.")
         return
 
     cursor = _load_cursor(claude_session_id)
