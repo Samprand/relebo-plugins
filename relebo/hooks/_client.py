@@ -18,7 +18,7 @@ _SPOOL_DIR = _RELEBO_DIR / "spool"
 _RENDER_CACHE_DIR = _RELEBO_DIR / "render-cache"
 
 _ORPHAN_IDLE_S = 2 * 60 * 60
-_TIMEOUT_S = 8
+_TIMEOUT_S = 60
 SHADOW = "shadow"
 ENFORCE = "enforce"
 _GATE_MODE_DEFAULT = SHADOW
