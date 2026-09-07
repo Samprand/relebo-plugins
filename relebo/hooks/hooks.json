@@ -1,5 +1,5 @@
 {
-  "description": "Relebo session spine: register the session, inject pinned rubric renders, capture the authorization ledger.",
+  "description": "Relebo session spine: register the session, inject pinned rubric renders, capture the authorization ledger, gate effectful actions before they run.",
   "hooks": {
     "SessionStart": [
       {
@@ -26,7 +26,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",

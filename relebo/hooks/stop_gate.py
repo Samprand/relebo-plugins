@@ -276,6 +276,12 @@ def main(payload: dict) -> None:
     retrying = bool(payload.get("stop_hook_active")) and bool(cursor.get("turn_key"))
     since_line = cursor.get("turn_line", cursor["line"]) if retrying else cursor["line"]
     delta, line_count = _read_delta(transcript_path, since_line)
+    # Claude Code appends the transcript asynchronously: the file may still end at the
+    # previous message when Stop fires. The payload's last_assistant_message is the
+    # authoritative final text of this turn.
+    last_text = payload.get("last_assistant_message")
+    if isinstance(last_text, str) and last_text.strip():
+        delta["final_text"] = last_text
     if not delta["tools"] and not delta["final_text"].strip():
         return
     turn_key = cursor["turn_key"] if retrying else f"turn-{int(time.time() * 1000)}"

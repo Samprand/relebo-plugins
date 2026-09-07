@@ -78,6 +78,66 @@ KNOWLEDGE_TRIGGER_PHRASES = (
 )
 RUBRIC_ADDITION_MARKER = "rubric addition"
 
+# Effect classes of a shell subcommand, strongest first. Destructive never runs from a
+# session; remote and shared-repo effects go to the engine's action gate before running.
+EFFECT_DESTRUCTIVE = "destructive"
+EFFECT_REMOTE = "remote"
+EFFECT_SHARED_REPO = "shared-repo"
+SUBCOMMAND_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+ENV_PREFIX_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")
+SUDO_PREFIX_RE = re.compile(r"^sudo\s+(?:-\S+\s+)*")
+RM_RECURSIVE_RE = re.compile(r"^rm\s+(?:-\S*r\S*|--recursive)\b")
+RM_SAFE_PATH_RE = re.compile(r"^(?:/private)?/tmp/|scratchpad|node_modules|/target(?:/|$)|/dist(?:/|$)|\.venv")
+DESTRUCTIVE_RES = (
+    re.compile(r"^git\s+push\b.*\s(?:--force|-f|--force-with-lease)\b"),
+    re.compile(r"^git\s+push\b.*\s\+\S"),
+    re.compile(r"^git\s+(?:reset\s+--hard|clean\s+-\S*f|branch\s+-D|checkout\s+--\s+\.|restore\s+\.)"),
+    re.compile(r"^gh\s+repo\s+(?:delete|archive)\b"),
+    re.compile(r"^gcloud\s+.*\bdelete\b"),
+    re.compile(r"^(?:npx\s+(?:--\S+\s+)*)?supabase\s+db\s+reset\b"),
+    re.compile(r"\bdrop\s+(?:table|database|schema)\b", re.I),
+)
+REMOTE_RES = (
+    re.compile(r"^git\s+push\b"),
+    re.compile(r"^gh\s+(?:workflow\s+run|release|secret|pr\s+merge|repo\s+(?:create|edit))\b"),
+    re.compile(r"^gh\s+api\b.*(?:-X|--method)\s*(?:POST|PUT|PATCH|DELETE)\b"),
+    re.compile(r"^gcloud\s+(?:run|secrets|iam|sql|compute|functions|projects)\b"),
+    re.compile(r"^(?:npx\s+(?:--\S+\s+)*)?supabase\s+(?:db\s+push|secrets|functions\s+deploy|link)\b"),
+    re.compile(r"^(?:npm|pnpm|yarn)\s+publish\b"),
+    re.compile(r"^docker\s+push\b"),
+    re.compile(r"^(?:kubectl\s+(?:apply|delete|scale)|terraform\s+(?:apply|destroy))\b"),
+    re.compile(r"^(?:curl|http|wget)\b.*(?:-X\s*(?:POST|PUT|PATCH|DELETE)\b|--data\b|\s-d\s)"),
+)
+SHARED_REPO_RES = (re.compile(r"^git\s+(?:commit|merge|rebase|tag|cherry-pick|revert)\b"),)
+MAX_EFFECT_COMMAND_CHARS = 400
+
+
+def _rm_is_destructive(part: str) -> bool:
+    if not RM_RECURSIVE_RE.search(part):
+        return False
+    targets = [token for token in part.split()[1:] if not token.startswith("-")]
+    # Build output and scratch dirs are disposable; anything else recursive is not.
+    return not targets or not all(RM_SAFE_PATH_RE.search(token) for token in targets)
+
+
+def command_effects(command: str) -> list[dict]:
+    """Per subcommand of a shell line, the strongest effect class it carries."""
+    effects: list[dict] = []
+    for raw in SUBCOMMAND_SPLIT_RE.split(command or ""):
+        part = SUDO_PREFIX_RE.sub("", ENV_PREFIX_RE.sub("", raw.strip()))
+        if not part:
+            continue
+        effect = None
+        if _rm_is_destructive(part) or any(rule.search(part) for rule in DESTRUCTIVE_RES):
+            effect = EFFECT_DESTRUCTIVE
+        elif any(rule.search(part) for rule in REMOTE_RES):
+            effect = EFFECT_REMOTE
+        elif any(rule.search(part) for rule in SHARED_REPO_RES):
+            effect = EFFECT_SHARED_REPO
+        if effect:
+            effects.append({"command": part[:MAX_EFFECT_COMMAND_CHARS], "effect": effect})
+    return effects
+
 
 def _file_text(path: str) -> str:
     try:
