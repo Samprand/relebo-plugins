@@ -4,10 +4,10 @@
   here, deterministically. Remote (push, deploy, release, secrets, production database)
   and shared-repo (commit, merge) effects go to the engine's action gate, which judges
   them against the session's authorization ledger and the applicable rules: allow runs,
-  deny stops, ask opens an Inbox approval and puts it in front of the human: in the
-  permission modes where Claude Code always prompts, as the native permission dialog
-  (approving runs the command and the post hook records the decision; declining leaves
-  it undone); in the other modes the action parks until the human answers in the Inbox.
+  deny stops, ask opens an Inbox approval and puts it in front of the human as Claude
+  Code's native permission dialog (approving runs the command and the post hook records
+  the decision; declining leaves it undone); only under bypassPermissions, which exists to
+  skip prompts, the action parks until the human answers in the Inbox.
   Without the engine the action asks the terminal: never a silent pass.
 - The Relebo decide tool: always behind the native dialog, so adopting a rubric proposal
   or answering an approval is the user's click, never the agent's call.
@@ -41,10 +41,10 @@ _MAX_COMMAND_CHARS = 2000
 _MAX_CHANGES_CHARS = 4000
 _DECISION_ASK = "ask"
 _DECISION_DENY = "deny"
-# Permission modes where Claude Code shows the dialog for every unlisted tool call, so an
-# "ask" from this hook is a real question to the human. Elsewhere (auto, bypass, plan) the
-# prompt may never appear, and the Inbox stays the only path.
-_DIALOG_MODES = ("default", "acceptEdits")
+# An "ask" from this hook opens Claude Code's permission dialog in default, acceptEdits and
+# auto mode (verified 2026-09-08: auto showed it and the click ran the command). Only
+# bypassPermissions exists to skip prompts, so there the Inbox stays the only path.
+_NO_DIALOG_MODES = ("bypassPermissions",)
 _VIA_DIALOG = "dialog"
 _DECIDE_TOOL = "mcp__plugin_relebo_relebo__relebo_decide_inbox"
 _DECISIONS = ("approve", "reject")
@@ -137,7 +137,7 @@ def _gate_command(payload: dict, tool_input: dict) -> None:
         _decide(_DECISION_DENY, f"Relebo supervisor: {detail}" + (f" — {reason}" if reason else ""))
     elif decision == _DECISION_ASK:
         entry = verdict.get("inbox_entry_id")
-        if entry and payload.get("permission_mode") in _DIALOG_MODES:
+        if entry and payload.get("permission_mode") not in _NO_DIALOG_MODES:
             # The native permission dialog is the form: the user approves or declines by
             # hand. Approving runs the command and post_tool relays the decision to the
             # Inbox entry; declining leaves the entry pending until the next prompt.
@@ -221,7 +221,7 @@ def _gate_decide(payload: dict, tool_input: dict) -> None:
     if verb not in _DECISIONS or not entry_id:
         _decide(_DECISION_DENY, "Relebo: relebo_decide_inbox needs entry_id and decision approve|reject.")
         return
-    if payload.get("permission_mode") not in _DIALOG_MODES:
+    if payload.get("permission_mode") in _NO_DIALOG_MODES:
         _decide(
             _DECISION_DENY,
             f"Relebo: this permission mode shows no dialog, so Inbox entry #{entry_id} is "
