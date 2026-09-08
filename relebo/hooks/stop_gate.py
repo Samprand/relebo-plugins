@@ -287,12 +287,16 @@ def main(payload: dict) -> None:
     turn_key = cursor["turn_key"] if retrying else f"turn-{int(time.time() * 1000)}"
     blocks = cursor.get("blocks", 0) if retrying else 0
 
-    guard_findings = _guards.run(delta, _cached_anchors())
     files, omitted = _collect_files(
         delta["touched"],
         payload.get("cwd", ""),
         delta["turn_start"],
         _client.turn_base(claude_session_id),
+    )
+    # Files changed by shell commands only show up here (git status), never as edit tools:
+    # the guards judge the tree's post-state, not the tool that produced it.
+    guard_findings = _guards.run(
+        delta, _cached_anchors(), [file["path"] for file in files if file.get("path")]
     )
     verdict = _client.post(
         f"/machine/sessions/{run_id}/gate",

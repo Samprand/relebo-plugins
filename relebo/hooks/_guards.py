@@ -52,7 +52,9 @@ RELATIVE_IMPORT_RES = {
 for _ext in (".tsx", ".js", ".jsx", ".mjs"):
     RELATIVE_IMPORT_RES[_ext] = RELATIVE_IMPORT_RES[".ts"]
 # Only the final file shows how many definitions actually ended up in it.
-DECLARATION_DIR_RE = re.compile(r"/(types|enums|dtos)/")
+DECLARATION_DIR_RE = re.compile(r"/(types|enums|dtos|constants)/")
+# Column-0 class in a declaration folder: one per file, like a TS export.
+PY_TOPLEVEL_CLASS_RE = re.compile(r"^class\s+([A-Za-z_]\w*)\b", re.M)
 TS_EXPORT_DECL_RE = re.compile(
     r"^export\s+(?:default\s+)?(?:abstract\s+)?(?:interface|type|class|enum)\s+([A-Za-z_$][\w$]*)",
     re.M,
@@ -176,9 +178,45 @@ def _column_zero_code(edit: dict) -> str:
     return ""
 
 
+def _principal_definitions(path: str) -> list[str]:
+    """Top-level declarations the file ends up with, in the languages this rubric governs."""
+    ext = os.path.splitext(path)[1]
+    if ext in (".ts", ".tsx"):
+        return TS_EXPORT_DECL_RE.findall(_file_text(path))
+    if ext == ".py":
+        return PY_TOPLEVEL_CLASS_RE.findall(_file_text(path))
+    return []
+
+
+def principal_definition_guards(paths: list[str]) -> list[dict]:
+    """Runs on every file the turn changed, whatever wrote it: an edit tool or a shell
+    command. The rule is about the file's final shape, not about how it was edited."""
+    findings: list[dict] = []
+    for path in sorted(set(paths)):
+        if (
+            EXEMPT_PATH_RE.search(path)
+            or not DECLARATION_DIR_RE.search(path)
+            or UTILS_EXEMPT_FILE_RE.search(path)
+        ):
+            continue
+        names = _principal_definitions(path)
+        extra = [n for n in names[1:] if not n.endswith(SUPPORTING_TYPE_SUFFIXES)]
+        if extra:
+            findings.append(
+                {
+                    "anchor": ANCHOR_ONE_PRINCIPAL,
+                    "evidence": (
+                        f"{path} declares {len(names)} top-level definitions "
+                        f"(`{'`, `'.join(names)}`); `{extra[0]}` is a second principal definition"
+                    ),
+                    "fix": f"Move `{extra[0]}` to its own file in the same folder.",
+                }
+            )
+    return findings
+
+
 def code_guards(edits: list[dict]) -> list[dict]:
     findings: list[dict] = []
-    seen_files: set[str] = set()
     for edit in edits:
         path = edit["input"].get("file_path") or ""
         if not path or EXEMPT_PATH_RE.search(path):
@@ -191,26 +229,6 @@ def code_guards(edits: list[dict]) -> list[dict]:
                         "anchor": ANCHOR_IMPORTS,
                         "evidence": f"relative parent import in {path}: `{match.group(0).strip()}`",
                         "fix": "Use the package/alias form (Dart `package:app/...`, TS `@/...`).",
-                    }
-                )
-        if (
-            ext in (".ts", ".tsx")
-            and DECLARATION_DIR_RE.search(path)
-            and path not in seen_files
-            and not UTILS_EXEMPT_FILE_RE.search(path)
-        ):
-            seen_files.add(path)
-            names = TS_EXPORT_DECL_RE.findall(_file_text(path))
-            extra = [n for n in names[1:] if not n.endswith(SUPPORTING_TYPE_SUFFIXES)]
-            if extra:
-                findings.append(
-                    {
-                        "anchor": ANCHOR_ONE_PRINCIPAL,
-                        "evidence": (
-                            f"{path} declares {len(names)} top-level exports "
-                            f"(`{'`, `'.join(names)}`); `{extra[0]}` is a second principal definition"
-                        ),
-                        "fix": f"Move `{extra[0]}` to its own file in the same folder.",
                     }
                 )
         if ext == ".dart":
@@ -290,9 +308,11 @@ def knowledge_capture_check(user_prompt: str, final_text: str) -> list[dict]:
     ]
 
 
-def run(delta: dict, anchors: set[str]) -> list[dict]:
+def run(delta: dict, anchors: set[str], changed_paths: list[str] | None = None) -> list[dict]:
+    edited = [(e.get("input") or {}).get("file_path") or "" for e in delta.get("edits") or []]
     findings = (
         code_guards(delta.get("edits") or [])
+        + principal_definition_guards([p for p in edited if p] + list(changed_paths or []))
         + fix_section_check(delta.get("final_text") or "", delta.get("user_prompt") or "")
         + knowledge_capture_check(delta.get("user_prompt") or "", delta.get("final_text") or "")
     )

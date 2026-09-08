@@ -15,26 +15,35 @@ from mcp.server.mcpserver import MCPServer
 
 _STATE_PATH = Path.home() / ".relebo" / "machine.json"
 _SESSIONS_DIR = Path.home() / ".relebo" / "sessions"
-_state: dict = {}
-if _STATE_PATH.exists():
-    _state = json.loads(_STATE_PATH.read_text())
-
-ENGINE_URL = (
-    os.environ.get("RELEBO_ENGINE_URL")
-    or _state.get("engine_url")
-    or "http://127.0.0.1:8100"
-).rstrip("/")
-TOKEN = os.environ.get("RELEBO_TOKEN", "")
-MACHINE_KEY = _state.get("fingerprint", "")
+_DEFAULT_ENGINE_URL = "http://127.0.0.1:8100"
 
 mcp = MCPServer("relebo")
 
 
+def _state() -> dict:
+    """Read on every call: the server outlives re-registrations of the machine, and a
+    URL or fingerprint frozen at import time would point at an engine that is gone."""
+    if not _STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(_STATE_PATH.read_text())
+    except ValueError:
+        return {}
+
+
+def _engine_url() -> str:
+    return (
+        os.environ.get("RELEBO_ENGINE_URL") or _state().get("engine_url") or _DEFAULT_ENGINE_URL
+    ).rstrip("/")
+
+
 def _headers() -> dict:
-    if MACHINE_KEY:
-        return {"X-Machine-Key": MACHINE_KEY}
-    if TOKEN:
-        return {"Authorization": f"Bearer {TOKEN}"}
+    machine_key = _state().get("fingerprint", "")
+    if machine_key:
+        return {"X-Machine-Key": machine_key}
+    token = os.environ.get("RELEBO_TOKEN", "")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
     return {}
 
 
@@ -47,9 +56,12 @@ def _request(method: str, path: str, body: dict | None = None) -> object:
                 "RELEBO_TOKEN with a session token from the app"
             )
         }
-    response = httpx.request(
-        method, f"{ENGINE_URL}{path}", json=body, headers=headers, timeout=120
-    )
+    url = f"{_engine_url()}{path}"
+    try:
+        response = httpx.request(method, url, json=body, headers=headers, timeout=120)
+    except httpx.HTTPError as e:
+        # A readable tool result, never an exception the client shows as "Error executing tool".
+        return {"error": f"Relebo engine unreachable at {url}: {e}"}
     if response.status_code >= 400:
         return {"error": f"{response.status_code}: {response.text[:300]}"}
     return response.json()
