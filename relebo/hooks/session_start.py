@@ -74,7 +74,8 @@ def main() -> None:
         _client.close_orphans(claude_session_id)
         context = _context(session["renders"], stale=False, mode=mode, project=session.get("project"))
     else:
-        _client.save_turn_base(claude_session_id, _git.snapshot(cwd))
+        if source != _client.SOURCE_COMPACT:
+            _client.save_turn_base(claude_session_id, _git.snapshot(cwd))
         context = _context(_client.cached_renders(), stale=True, mode=mode, project=None)
 
     if context:

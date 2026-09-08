@@ -51,17 +51,31 @@ _INJECTED_PREFIXES = (
 
 
 def _cursor_path(claude_session_id: str) -> Path:
-    return _CURSOR_DIR / f"{claude_session_id}.cursor.json"
+    return _CURSOR_DIR / f"{claude_session_id}{_client.CURSOR_SUFFIX}"
 
 
-def _load_cursor(claude_session_id: str) -> dict:
+def _load_cursor(claude_session_id: str, transcript_path: str) -> dict:
     path = _cursor_path(claude_session_id)
     if path.exists():
         try:
             return json.loads(path.read_text())
         except ValueError:
             pass
-    return {"line": 0, "turn_line": 0, "turn_key": "", "blocks": 0}
+    # No cursor for a transcript with history (a lost file, a plugin update): judging from
+    # line 0 would treat the whole session as this turn. The last prompt is where it starts.
+    return {"line": _last_prompt_line(transcript_path), "turn_line": 0, "turn_key": "", "blocks": 0}
+
+
+def _last_prompt_line(transcript_path: str) -> int:
+    last = 0
+    for index, line in enumerate(Path(transcript_path).read_text().splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and _user_text(entry):
+            last = index
+    return last
 
 
 def _save_cursor(claude_session_id: str, cursor: dict) -> None:
@@ -270,7 +284,7 @@ def main(payload: dict) -> None:
         _receipt("Relebo supervisor unreachable — unsupervised turn.")
         return
 
-    cursor = _load_cursor(claude_session_id)
+    cursor = _load_cursor(claude_session_id, transcript_path)
     # A retry after any stop-hook block (ours or another plugin's) is the same turn:
     # re-read from where the turn started so the verdict sees the fix in context.
     retrying = bool(payload.get("stop_hook_active")) and bool(cursor.get("turn_key"))
@@ -346,6 +360,12 @@ def main(payload: dict) -> None:
         _receipt(f"{prefix}: delivered with unresolved findings — escalated to your Inbox.")
     elif verdict.get("decision") == "block":
         _receipt(f"{prefix} (shadow) would block: {_findings_line(findings)}")
+    for proposal in (verdict or {}).get("proposals") or []:
+        entry_id = proposal.get("inbox_entry_id")
+        _receipt(
+            f"{prefix}: rubric proposal #{entry_id} ({proposal.get('title')}) awaits the user — "
+            "offer relebo_decide_inbox (Claude Code asks them in its dialog) or the Inbox."
+        )
 
 
 if __name__ == "__main__":

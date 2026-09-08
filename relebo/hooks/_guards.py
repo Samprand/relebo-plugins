@@ -2,7 +2,7 @@
 gate mechanically checkable rules with zero judge cost and keep gating when the
 engine is unreachable. Findings cite anchors only — a guard whose anchor is not
 in the cached renders is dropped, so offline verdicts stay within the pinned
-vocabulary. Ported from the jar-ai compliance gate (same author, measured on
+vocabulary. Ported from the previous compliance gate (same author, measured on
 ~2,600 turns). Stdlib only, python3.9-compatible."""
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ ANCHOR_KNOWLEDGE_CAPTURE = "knowledge-capture-corrections-become"
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
-EXEMPT_PATH_RE = re.compile(r"/(tmp|scratchpad|\.claude|jar-ai)/")
+EXEMPT_PATH_RE = re.compile(r"/(tmp|scratchpad|\.claude)/")
 DART_ENUM_RE = re.compile(r"^\s*enum\s+([A-Za-z_]\w*)\b", re.M)
 # Column-0 declaration: return type + lowercase name + paren.
 DART_TOPLEVEL_FN_RE = re.compile(
@@ -85,6 +85,7 @@ RUBRIC_ADDITION_MARKER = "rubric addition"
 EFFECT_DESTRUCTIVE = "destructive"
 EFFECT_REMOTE = "remote"
 EFFECT_SHARED_REPO = "shared-repo"
+EFFECT_KNOWLEDGE_BYPASS = "knowledge-bypass"
 SUBCOMMAND_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 ENV_PREFIX_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")
 SUDO_PREFIX_RE = re.compile(r"^sudo\s+(?:-\S+\s+)*")
@@ -111,6 +112,16 @@ REMOTE_RES = (
     re.compile(r"^(?:curl|http|wget)\b.*(?:-X\s*(?:POST|PUT|PATCH|DELETE)\b|--data\b|\s-d\s)"),
 )
 SHARED_REPO_RES = (re.compile(r"^git\s+(?:commit|merge|rebase|tag|cherry-pick|revert)\b"),)
+# Rules and approvals reach Relebo only through the Inbox. Seeding scripts, direct writes to
+# the memory or inbox tables and the memory service's adopt calls go behind the supervisor's
+# back, so a session never runs them. File contents are out of reach here: a script written
+# elsewhere and then run is the supervisor judge's to catch.
+KNOWLEDGE_BYPASS_RES = (
+    re.compile(r"\bseed_rubric\.py\b"),
+    re.compile(r"\b(?:memory_pieces|inbox_entries)\b.*\b(?:insert|update|upsert|delete|rpc)\b", re.I),
+    re.compile(r"\b(?:supersede_core_piece|add_core_piece|retire_atom)\b"),
+    re.compile(r"/machine/approvals/\d+/answer|/inbox/\d+/answer"),
+)
 MAX_EFFECT_COMMAND_CHARS = 400
 
 
@@ -130,7 +141,9 @@ def command_effects(command: str) -> list[dict]:
         if not part:
             continue
         effect = None
-        if _rm_is_destructive(part) or any(rule.search(part) for rule in DESTRUCTIVE_RES):
+        if any(rule.search(part) for rule in KNOWLEDGE_BYPASS_RES):
+            effect = EFFECT_KNOWLEDGE_BYPASS
+        elif _rm_is_destructive(part) or any(rule.search(part) for rule in DESTRUCTIVE_RES):
             effect = EFFECT_DESTRUCTIVE
         elif any(rule.search(part) for rule in REMOTE_RES):
             effect = EFFECT_REMOTE

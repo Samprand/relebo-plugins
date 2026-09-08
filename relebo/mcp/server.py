@@ -94,9 +94,11 @@ def relebo_inbox(workspace_id: int) -> object:
 
 
 @mcp.tool()
-def relebo_answer_inbox(entry_id: int, decision: str) -> object:
-    """Answer a pending inbox entry. decision: 'approve' or 'reject'."""
-    return _request("POST", f"/inbox/{entry_id}/answer", {"decision": decision})
+def relebo_decide_inbox(entry_id: int, decision: str) -> object:
+    """Put a pending Relebo approval or rubric proposal in front of the user: Claude Code
+    shows its permission dialog and the user's click there is the decision. decision:
+    'approve' or 'reject'. Never call it for a decision the user did not ask you to relay."""
+    return _request("POST", f"/machine/approvals/{entry_id}/answer", {"decision": decision})
 
 
 @mcp.tool()

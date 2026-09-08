@@ -1,5 +1,7 @@
 """PostToolUse for ExitPlanMode and AskUserQuestion: plan approvals and question
-answers are first-class authorization entries in the ledger.
+answers are first-class authorization entries in the ledger. For Bash: a command that
+ran after the gate asked through the permission dialog means the user approved it there;
+the decision is relayed to its Inbox entry, which writes the ledger.
 
 Only what the user actually chose is recorded. The options offered never enter the
 ledger: a judge reading them would take a menu for an approval."""
@@ -16,6 +18,9 @@ import _client  # noqa: E402
 
 _MAX_FIELD_CHARS = 6000
 _ASK_USER_QUESTION = "AskUserQuestion"
+_BASH = "Bash"
+_VIA_DIALOG = "dialog"
+_DECISION_APPROVE = "approve"
 
 
 def _trim(value: object) -> str:
@@ -37,9 +42,27 @@ def _authorization(tool: str, tool_input: dict, tool_response: object) -> dict |
     }
 
 
+def _relay_dialog_approval(payload: dict) -> None:
+    """The command ran, so the dialog the gate opened was approved: the Inbox entry learns it."""
+    session_id = payload.get("session_id", "")
+    tool_use_id = payload.get("tool_use_id") or ""
+    command = (payload.get("tool_input") or {}).get("command") or ""
+    for approval in _client.pending_approvals(session_id):
+        if approval.get("via") != _VIA_DIALOG:
+            continue
+        same_call = tool_use_id and approval.get("tool_use_id") == tool_use_id
+        if not same_call and approval.get("command") != command:
+            continue
+        _client.answer_approval(approval["entry_id"], _DECISION_APPROVE)
+        _client.clear_pending_approval(session_id, approval["entry_id"])
+
+
 def main() -> None:
     payload = json.loads(sys.stdin.read() or "{}")
     tool = payload.get("tool_name", "")
+    if tool == _BASH:
+        _relay_dialog_approval(payload)
+        return
     entry = _authorization(tool, payload.get("tool_input") or {}, payload.get("tool_response"))
     if entry is None:
         return

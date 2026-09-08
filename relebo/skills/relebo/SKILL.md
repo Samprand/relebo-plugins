@@ -11,8 +11,10 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
 
 1. Start with `relebo_workspaces` to resolve the workspace id — never guess ids.
 2. Personal workspace = the user's own space; shared workspaces belong to their organizations.
-3. Before answering an inbox entry (`relebo_answer_inbox`) always show the entry and ask the
-   user for the decision — approve/reject is theirs, not yours.
+3. Inbox decisions are the user's alone. When the user wants to decide an entry from the
+   session, call `relebo_decide_inbox(entry_id, decision)`: Claude Code shows its permission
+   dialog and the user's click is the decision. Never call it for a decision the user did not
+   ask you to relay; a "sí" in the chat is that request, the dialog is the approval.
 4. `relebo_save_knowledge` writes to the team's memory: save only what the user explicitly
    asked to keep, with the subject they named (or propose one and confirm).
 5. Knowledge read from Relebo may be stale or perishable — treat it as context, not ground
