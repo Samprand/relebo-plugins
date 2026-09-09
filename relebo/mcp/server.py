@@ -16,6 +16,7 @@ from mcp.server.mcpserver import MCPServer
 _STATE_PATH = Path.home() / ".relebo" / "machine.json"
 _SESSIONS_DIR = Path.home() / ".relebo" / "sessions"
 _DEFAULT_ENGINE_URL = "http://127.0.0.1:8100"
+_PERSONAL_KIND = "personal"
 
 mcp = MCPServer("relebo")
 
@@ -120,11 +121,19 @@ def relebo_knowledge_pieces(
 
 
 @mcp.tool()
-def relebo_save_knowledge(workspace_id: int, subject: str, content: str, kind: str) -> object:
-    """Save a knowledge piece in a workspace. kind: 'atom' (short fact), 'doc' or 'record'."""
+def relebo_save_knowledge(subject: str, content: str, kind: str) -> object:
+    """Save a knowledge piece in the user's personal workspace, under the project or topic it
+    belongs to. kind: 'atom' (short fact), 'doc' or 'record'. Nothing reaches a team from
+    here: the user shares it from Knowledge, or approves the suggestion in their Inbox."""
+    workspaces = _request("GET", "/workspaces")
+    if not isinstance(workspaces, list):
+        return workspaces
+    personal = next((w for w in workspaces if w.get("kind") == _PERSONAL_KIND), None)
+    if personal is None:
+        return {"error": "no personal workspace for this identity"}
     return _request(
         "POST",
-        f"/workspaces/{workspace_id}/knowledge",
+        f"/workspaces/{personal['id']}/knowledge",
         {"subject": subject, "content": content, "kind": kind},
     )
 

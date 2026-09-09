@@ -121,6 +121,10 @@ KNOWLEDGE_BYPASS_RES = (
     re.compile(r"\b(?:memory_pieces|inbox_entries)\b.*\b(?:insert|update|upsert|delete|rpc)\b", re.I),
     re.compile(r"\b(?:supersede_core_piece|add_core_piece|retire_atom)\b"),
     re.compile(r"/machine/approvals/\d+/answer|/inbox/\d+/answer"),
+    # Topics, pieces and shares change only from the app or the MCP tools, never by hand.
+    re.compile(
+        r"(?=.*-X\s*(?:POST|PATCH|PUT|DELETE)\b).*(?:/subjects/\d+|/pieces/\d+|/workspaces/\d+/subjects)\b"
+    ),
 )
 MAX_EFFECT_COMMAND_CHARS = 400
 
