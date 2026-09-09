@@ -8,7 +8,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"",
-            "timeout": 60
+            "timeout": 60,
+            "statusMessage": "Relebo: registering the session…"
           }
         ]
       }
@@ -19,7 +20,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt.py\"",
-            "timeout": 60
+            "timeout": 60,
+            "statusMessage": "Relebo: loading rules for this turn…"
           }
         ]
       }
@@ -31,7 +33,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool.py\"",
-            "timeout": 600
+            "timeout": 600,
+            "statusMessage": "Relebo: gating the action…"
           }
         ]
       }
@@ -43,7 +46,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/post_tool.py\"",
-            "timeout": 60
+            "timeout": 60,
+            "statusMessage": "Relebo: recording the result…"
           }
         ]
       }
@@ -54,7 +58,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_gate.py\"",
-            "timeout": 120
+            "timeout": 120,
+            "statusMessage": "Relebo: judging the turn…"
           }
         ]
       }
@@ -65,7 +70,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py\"",
-            "timeout": 60
+            "timeout": 60,
+            "statusMessage": "Relebo: saving context before compaction…"
           }
         ]
       }
@@ -76,7 +82,8 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"",
-            "timeout": 60
+            "timeout": 60,
+            "statusMessage": "Relebo: closing the session…"
           }
         ]
       }
