@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _client  # noqa: E402
 import _git  # noqa: E402
 import _guards  # noqa: E402
+import _review  # noqa: E402
 
 _CURSOR_DIR = Path.home() / ".relebo" / "sessions"
 _MAX_TOOL_CHARS = 400
@@ -35,6 +36,7 @@ _HEAD_LINES = 200
 _SOURCE_EDIT = "edit"
 _SOURCE_HISTORY = "history"
 _SOURCE_GIT = "git"
+_SOURCE_REVIEW = "review"
 _ANCHOR_RE = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
 _SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
 # Claude Code replays tool/system output as user entries; those never authorize work.
@@ -248,6 +250,24 @@ def _collect_files(
     return files, omitted
 
 
+def _append_review_files(files: list[dict], omitted: list[str], review: dict) -> None:
+    """The diff under review, after the turn's own files and inside the same budget:
+    the judge reads what the review was supposed to read."""
+    budget = _MAX_TOTAL_FILE_CHARS - sum(len(f.get("diff") or f.get("head") or "") for f in files)
+    for path in review["paths"]:
+        if len(files) >= _MAX_FILES:
+            omitted.append(path)
+            continue
+        body = review["diffs"][path][:_MAX_FILE_CHARS]
+        if len(body) > budget:
+            omitted.append(path)
+            continue
+        budget -= len(body)
+        files.append(
+            {"path": path, "source": _SOURCE_REVIEW, "untracked": False, "diff": body, "head": ""}
+        )
+
+
 def _cached_anchors() -> set[str]:
     anchors: set[str] = set()
     for render in _client.cached_renders():
@@ -307,10 +327,17 @@ def main(payload: dict) -> None:
         delta["turn_start"],
         _client.turn_base(claude_session_id),
     )
+    review = _review.delta(payload.get("cwd", ""), delta["user_prompt"])
+    if review:
+        _append_review_files(files, omitted, review)
+        delta["edits"] = delta["edits"] + _review.as_edits(review)
     # Files changed by shell commands only show up here (git status), never as edit tools:
     # the guards judge the tree's post-state, not the tool that produced it.
     guard_findings = _guards.run(
-        delta, _cached_anchors(), [file["path"] for file in files if file.get("path")]
+        delta,
+        _cached_anchors(),
+        [file["path"] for file in files if file.get("path")],
+        review["new_texts"] if review else None,
     )
     verdict = _client.post(
         f"/machine/sessions/{run_id}/gate",
@@ -362,6 +389,14 @@ def main(payload: dict) -> None:
         _receipt(f"{prefix} (shadow) would block: {_findings_line(findings)}")
     for proposal in (verdict or {}).get("proposals") or []:
         entry_id = proposal.get("inbox_entry_id")
+        if proposal.get("scope") == "system":
+            # The notice the author gets: the rule went to Relebo's maintainers, no decision here.
+            _receipt(
+                f"Rubric addition (system) [{proposal.get('anchor')}]: sent to the Relebo "
+                "maintainers to improve the system. Nothing to decide on your side; you are asked "
+                f"only if it needs your data. (Inbox #{entry_id})"
+            )
+            continue
         _receipt(
             f"{prefix}: rubric proposal #{entry_id} ({proposal.get('title')}) awaits the user — "
             "offer relebo_decide_inbox (Claude Code asks them in its dialog) or the Inbox."

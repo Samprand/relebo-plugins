@@ -6,14 +6,19 @@
   them against the session's authorization ledger and the applicable rules: allow runs,
   deny stops, ask opens an Inbox approval and puts it in front of the human as Claude
   Code's native permission dialog (approving runs the command and the post hook records
-  the decision; declining leaves it undone); only under bypassPermissions, which exists to
-  skip prompts, the action parks until the human answers in the Inbox.
+  the decision; dismissing it — Esc or decline — runs nothing and cancels the entry at the
+  next prompt or the session's end); only under bypassPermissions, which exists to skip
+  prompts, the action parks until the human answers in the Inbox.
   Without the engine the action asks the terminal: never a silent pass.
 - The Relebo decide tool: always behind the native dialog, so adopting a rubric proposal
-  or answering an approval is the user's click, never the agent's call.
+  or answering an approval is the user's click, never the agent's call. Dismissing that
+  dialog cancels the entry: a dismissal is not a rejection.
 - File writes: Claude Code's per-repo auto-memory is where an agent without a memory
   tool parks what the user just said. Relebo already captures it from the session, and
   the rubric forbids that store — so the write is denied at the tool, not after the turn.
+  Every other write runs the rubric's mechanical guards (relative import, enum suffix,
+  top-level util function, second principal definition) on the pending content: a hit
+  asks the human before the file changes, instead of the Stop gate correcting it after.
 """
 
 import json
@@ -138,9 +143,10 @@ def _gate_command(payload: dict, tool_input: dict) -> None:
     elif decision == _DECISION_ASK:
         entry = verdict.get("inbox_entry_id")
         if entry and payload.get("permission_mode") not in _NO_DIALOG_MODES:
-            # The native permission dialog is the form: the user approves or declines by
+            # The native permission dialog is the form: the user approves or dismisses it by
             # hand. Approving runs the command and post_tool relays the decision to the
-            # Inbox entry; declining leaves the entry pending until the next prompt.
+            # Inbox entry; dismissing (Esc or decline) runs nothing, and the next prompt or
+            # the session's end cancels the entry — a dismissal is not a rejection.
             _client.record_pending_approval(
                 session_id,
                 {
@@ -155,7 +161,7 @@ def _gate_command(payload: dict, tool_input: dict) -> None:
             _decide(
                 _DECISION_ASK,
                 f"Relebo supervisor: {detail} Inbox entry #{entry}. Approving here runs the "
-                "command and records your decision; declining leaves it undone.",
+                "command and records your decision; Esc or declining cancels the request.",
             )
             return
         # No dialog in this permission mode: the human decides in the Inbox. The hook waits
@@ -178,7 +184,8 @@ def _gate_command(payload: dict, tool_input: dict) -> None:
                 "run this command again now. To resume without the user, arm the Monitor tool "
                 f"with `python3 {watcher} {run_id} {entry}` (persistent): it prints one line "
                 "when the decision lands; on `approved` run the exact same command, on "
-                "`rejected` or `expired` stop and tell the user. Then continue with other work.",
+                "`rejected`, `cancelled` or `expired` stop and tell the user. Then continue with "
+                "other work.",
             )
             return
         _decide(
@@ -200,10 +207,10 @@ def _await_decision(run_id: int, entry_id: int) -> str:
     return _STATUS_PENDING
 
 
-def _guard_memory_write(tool_input: dict) -> None:
+def _guard_memory_write(tool_input: dict) -> bool:
     file_path = tool_input.get("file_path") or ""
     if not _REPO_MEMORY_RE.search(file_path):
-        return
+        return False
     _decide(
         _DECISION_DENY,
         f"{file_path} is Claude Code's per-repo memory, which this project does "
@@ -211,11 +218,40 @@ def _guard_memory_write(tool_input: dict) -> None:
         "itself. Do not persist it by hand; when the user asks to keep something "
         "for the team, call relebo_save_knowledge.",
     )
+    return True
+
+
+def _edit_findings(tool: str, tool_input: dict, anchors: set[str]) -> list[dict]:
+    """Guard findings on the content about to be written. A Write carries the file's whole
+    final shape, so the one-definition guard reads it too; an Edit is a fragment."""
+    edit = {"tool": tool, "input": tool_input}
+    path = tool_input.get("file_path") or ""
+    findings = _guards.code_guards([edit])
+    if tool == "Write" and path:
+        findings += _guards.principal_definition_guards(
+            [path], texts={path: tool_input.get("content") or ""}
+        )
+    return [finding for finding in findings if finding["anchor"] in anchors]
+
+
+def _gate_edit(tool: str, tool_input: dict) -> None:
+    findings = _edit_findings(tool, tool_input, _client.cached_anchors())
+    if not findings:
+        return
+    _decide(
+        _DECISION_ASK,
+        "Relebo supervisor: this write breaks the rubric — "
+        + "; ".join(f"[{f['anchor']}] {f['evidence']} Fix: {f['fix']}" for f in findings)
+        + ". Approve to write it as is, or decline and fix it first.",
+    )
 
 
 def _gate_decide(payload: dict, tool_input: dict) -> None:
     """The decide tool is the agent's way to put a proposal or approval in front of the
-    user; the answer is the user's click in the dialog, so without a dialog it does not run."""
+    user; the answer is the user's click in the dialog, so without a dialog it does not run.
+    Allowing runs the tool, which answers the entry, and post_tool forgets the parked call;
+    dismissing the dialog runs nothing, so the next prompt or the session's end cancels the
+    entry."""
     entry_id = tool_input.get("entry_id")
     verb = str(tool_input.get("decision") or "")
     if verb not in _DECISIONS or not entry_id:
@@ -228,10 +264,22 @@ def _gate_decide(payload: dict, tool_input: dict) -> None:
             "decided by the user in the Inbox, not here.",
         )
         return
+    session_id = payload.get("session_id", "")
+    _client.record_pending_approval(
+        session_id,
+        {
+            "entry_id": entry_id,
+            "run_id": _client.session_run_id(session_id),
+            "tool": _DECIDE_TOOL,
+            "summary": f"{verb} Inbox entry #{entry_id}",
+            "tool_use_id": payload.get("tool_use_id") or "",
+            "via": _VIA_DIALOG,
+        },
+    )
     _decide(
         _DECISION_ASK,
         f"Relebo: you are about to {verb.upper()} Inbox entry #{entry_id}. Only you decide: "
-        "approving here is the decision itself.",
+        "approving here is the decision itself; Esc or declining cancels the entry.",
     )
 
 
@@ -245,7 +293,10 @@ def main() -> None:
     if tool == _DECIDE_TOOL:
         _gate_decide(payload, tool_input)
         return
-    _guard_memory_write(tool_input)
+    if _guard_memory_write(tool_input):
+        return
+    if tool in _guards.EDIT_TOOLS:
+        _gate_edit(tool, tool_input)
 
 
 if __name__ == "__main__":

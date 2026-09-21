@@ -52,13 +52,25 @@ RELATIVE_IMPORT_RES = {
 for _ext in (".tsx", ".js", ".jsx", ".mjs"):
     RELATIVE_IMPORT_RES[_ext] = RELATIVE_IMPORT_RES[".ts"]
 # Only the final file shows how many definitions actually ended up in it.
-DECLARATION_DIR_RE = re.compile(r"/(types|enums|dtos|constants)/")
+DECLARATION_DIR_RE = re.compile(r"/(types|enums|dtos|constants|utils)/")
 # Column-0 class in a declaration folder: one per file, like a TS export.
 PY_TOPLEVEL_CLASS_RE = re.compile(r"^class\s+([A-Za-z_]\w*)\b", re.M)
 TS_EXPORT_DECL_RE = re.compile(
     r"^export\s+(?:default\s+)?(?:abstract\s+)?(?:interface|type|class|enum)\s+([A-Za-z_$][\w$]*)",
     re.M,
 )
+# Column-0 Dart declaration; typedef excluded — a callback alias beside its widget is idiomatic.
+DART_TOPLEVEL_DECL_RE = re.compile(
+    r"^(?:(?:abstract|base|final|sealed|interface|mixin)\s+)*(?:class|enum|mixin|extension)"
+    r"\s+([A-Za-z_]\w*)\b",
+    re.M,
+)
+PRINCIPAL_DECL_RES = {
+    ".ts": TS_EXPORT_DECL_RE,
+    ".tsx": TS_EXPORT_DECL_RE,
+    ".py": PY_TOPLEVEL_CLASS_RE,
+    ".dart": DART_TOPLEVEL_DECL_RE,
+}
 SUPPORTING_TYPE_SUFFIXES = ("Props", "Args", "Params", "Options", "Config")
 MAX_GUARD_FILE_BYTES = 200_000
 
@@ -195,19 +207,18 @@ def _column_zero_code(edit: dict) -> str:
     return ""
 
 
-def _principal_definitions(path: str) -> list[str]:
+def _principal_definitions(path: str, text: str | None = None) -> list[str]:
     """Top-level declarations the file ends up with, in the languages this rubric governs."""
-    ext = os.path.splitext(path)[1]
-    if ext in (".ts", ".tsx"):
-        return TS_EXPORT_DECL_RE.findall(_file_text(path))
-    if ext == ".py":
-        return PY_TOPLEVEL_CLASS_RE.findall(_file_text(path))
-    return []
+    pattern = PRINCIPAL_DECL_RES.get(os.path.splitext(path)[1])
+    if pattern is None:
+        return []
+    return pattern.findall(_file_text(path) if text is None else text)
 
 
-def principal_definition_guards(paths: list[str]) -> list[dict]:
+def principal_definition_guards(paths: list[str], texts: dict[str, str] | None = None) -> list[dict]:
     """Runs on every file the turn changed, whatever wrote it: an edit tool or a shell
-    command. The rule is about the file's final shape, not about how it was edited."""
+    command. The rule is about the file's final shape, not about how it was edited — a
+    caller that holds that shape (a reviewed PR not checked out) passes it in `texts`."""
     findings: list[dict] = []
     for path in sorted(set(paths)):
         if (
@@ -216,15 +227,19 @@ def principal_definition_guards(paths: list[str]) -> list[dict]:
             or UTILS_EXEMPT_FILE_RE.search(path)
         ):
             continue
-        names = _principal_definitions(path)
-        extra = [n for n in names[1:] if not n.endswith(SUPPORTING_TYPE_SUFFIXES)]
+        names = _principal_definitions(path, (texts or {}).get(path))
+        # A file-private helper (`_Foo`) or a supporting type rides with the principal.
+        principals = [
+            n for n in names if not n.startswith("_") and not n.endswith(SUPPORTING_TYPE_SUFFIXES)
+        ]
+        extra = principals[1:]
         if extra:
             findings.append(
                 {
                     "anchor": ANCHOR_ONE_PRINCIPAL,
                     "evidence": (
-                        f"{path} declares {len(names)} top-level definitions "
-                        f"(`{'`, `'.join(names)}`); `{extra[0]}` is a second principal definition"
+                        f"{path} declares {len(principals)} principal definitions "
+                        f"(`{'`, `'.join(principals)}`); `{extra[0]}` is a second one"
                     ),
                     "fix": f"Move `{extra[0]}` to its own file in the same folder.",
                 }
@@ -325,11 +340,16 @@ def knowledge_capture_check(user_prompt: str, final_text: str) -> list[dict]:
     ]
 
 
-def run(delta: dict, anchors: set[str], changed_paths: list[str] | None = None) -> list[dict]:
+def run(
+    delta: dict,
+    anchors: set[str],
+    changed_paths: list[str] | None = None,
+    texts: dict[str, str] | None = None,
+) -> list[dict]:
     edited = [(e.get("input") or {}).get("file_path") or "" for e in delta.get("edits") or []]
     findings = (
         code_guards(delta.get("edits") or [])
-        + principal_definition_guards([p for p in edited if p] + list(changed_paths or []))
+        + principal_definition_guards([p for p in edited if p] + list(changed_paths or []), texts)
         + fix_section_check(delta.get("final_text") or "", delta.get("user_prompt") or "")
         + knowledge_capture_check(delta.get("user_prompt") or "", delta.get("final_text") or "")
     )

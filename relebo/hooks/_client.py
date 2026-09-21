@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,7 @@ _STATE_PATH = _RELEBO_DIR / "machine.json"
 _SESSIONS_DIR = _RELEBO_DIR / "sessions"
 _SPOOL_DIR = _RELEBO_DIR / "spool"
 _RENDER_CACHE_DIR = _RELEBO_DIR / "render-cache"
+_ANCHOR_RE = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
 
 _ORPHAN_IDLE_S = 2 * 60 * 60
 _TIMEOUT_S = 60
@@ -28,6 +30,12 @@ _RUBRIC_CONTEXT_DEFAULT = RUBRIC_INDEX
 SOURCE_COMPACT = "compact"
 # The stop gate's transcript cursor lives next to the session file, same directory.
 CURSOR_SUFFIX = ".cursor.json"
+# A gate approval put in Claude Code's permission dialog. A parked one whose call ended was
+# dismissed there (Esc or decline), and a dismissal cancels the entry — it never rejects it.
+VIA_DIALOG = "dialog"
+DECISION_CANCEL = "cancel"
+# The order renders are injected and anchor collisions are settled in.
+_SCOPE_ORDER = {"system": 0, "personal": 1, "shared": 2}
 
 
 def _state() -> dict:
@@ -205,6 +213,17 @@ def clear_pending_approval(claude_session_id: str, entry_id: int) -> None:
     path.write_text(json.dumps(state))
 
 
+def cancel_dismissed_dialogs(claude_session_id: str) -> None:
+    """The session is over, so every dialog the gate opened has closed. An approved one ran
+    its tool and post_tool forgot the parked call; whatever is still parked was dismissed,
+    and its entry is cancelled: nobody decided it."""
+    for approval in pending_approvals(claude_session_id):
+        if approval.get("via") != VIA_DIALOG:
+            continue
+        if answer_approval(approval["entry_id"], DECISION_CANCEL) is not None:
+            clear_pending_approval(claude_session_id, approval["entry_id"])
+
+
 def touch_session(claude_session_id: str) -> None:
     path = _SESSIONS_DIR / f"{claude_session_id}.json"
     if path.exists():
@@ -235,6 +254,7 @@ def close_orphans(current_session_id: str) -> None:
             continue
         if state.get("closed_as_orphan"):
             continue
+        cancel_dismissed_dialogs(session_id)
         flush_spool(session_id, run_id)
         if post(f"/machine/sessions/{run_id}/close", {}) is not None:
             state["closed_as_orphan"] = True
@@ -294,5 +314,35 @@ def cached_renders() -> list[dict]:
             renders.append(json.loads(path.read_text()))
         except ValueError:
             continue
-    # Personal precedence holds in the cache too.
-    return sorted(renders, key=lambda r: (r.get("scope") != "personal", r.get("workspace_id")))
+    # The engine's precedence holds in the cache too.
+    return sorted(
+        renders,
+        key=lambda r: (_SCOPE_ORDER.get(r.get("scope"), len(_SCOPE_ORDER)), r.get("workspace_id")),
+    )
+
+
+def cached_anchors() -> set[str]:
+    """Anchors the pinned renders define: a guard finding outside them is dropped, so an
+    offline verdict never cites a rule the user has not adopted."""
+    anchors: set[str] = set()
+    for render in cached_renders():
+        anchors.update(_ANCHOR_RE.findall(render.get("content") or ""))
+    return anchors
+
+
+def anchors_of(rendered: list[str]) -> set[str]:
+    return {anchor for text in rendered for anchor in _ANCHOR_RE.findall(text)}
+
+
+def served_anchors(claude_session_id: str) -> set[str]:
+    return set(_session(claude_session_id).get("served_anchors") or [])
+
+
+def mark_served(claude_session_id: str, anchors: set[str]) -> None:
+    """Rules already in this session's context: a later recall for a write skips them."""
+    path = _SESSIONS_DIR / f"{claude_session_id}.json"
+    if not path.exists() or not anchors:
+        return
+    state = _session(claude_session_id)
+    state["served_anchors"] = sorted(set(state.get("served_anchors") or []) | anchors)
+    path.write_text(json.dumps(state))

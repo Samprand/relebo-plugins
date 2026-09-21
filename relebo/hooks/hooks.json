@@ -41,7 +41,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "ExitPlanMode|AskUserQuestion|Bash",
+        "matcher": "ExitPlanMode|AskUserQuestion|Bash|Edit|Write|MultiEdit|mcp__plugin_relebo_relebo__relebo_decide_inbox",
         "hooks": [
           {
             "type": "command",

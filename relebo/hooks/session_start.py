@@ -31,10 +31,14 @@ def _index(content: str) -> str:
 
 def _context(renders: list[dict], stale: bool, mode: str, project: str | None) -> str:
     indexed = _client.rubric_context() == _client.RUBRIC_INDEX
+    # Index mode leaves the facts to the prompts that call for them; offline no prompt is
+    # answered, so the cached facts go in now or the session works blind.
+    deferred = indexed and not stale
     shown = [
         r
         for r in renders
-        if r.get("content") and not (indexed and (r.get("kind") or _RENDER_RUBRIC) != _RENDER_RUBRIC)
+        if r.get("content")
+        and not (deferred and (r.get("kind") or _RENDER_RUBRIC) != _RENDER_RUBRIC)
     ]
     present = [
         f"{'rubric index' if indexed else 'rubric'} {r['scope']}"
@@ -45,7 +49,7 @@ def _context(renders: list[dict], stale: bool, mode: str, project: str | None) -
     header = (
         f"[Relebo session — project: {project or 'unregistered'} · gate {mode} · "
         f"loaded: {', '.join(present) or 'nothing'}"
-        f"{' · rules and facts arrive per prompt' if indexed else ''}"
+        f"{' · rules and facts arrive per prompt' if deferred else ''}"
         f"{' · STALE — engine unreachable' if stale else ''}]"
     )
     blocks = [header]

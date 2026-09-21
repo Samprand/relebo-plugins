@@ -13,10 +13,14 @@ from pathlib import Path
 import httpx
 from mcp.server.mcpserver import MCPServer
 
+from _inbox_status import InboxStatusE
+from _rule_scope import RuleScopeE
+
 _STATE_PATH = Path.home() / ".relebo" / "machine.json"
 _SESSIONS_DIR = Path.home() / ".relebo" / "sessions"
 _DEFAULT_ENGINE_URL = "http://127.0.0.1:8100"
 _PERSONAL_KIND = "personal"
+_PAYLOAD_PROPOSAL = "proposal"
 
 mcp = MCPServer("relebo")
 
@@ -88,10 +92,34 @@ def relebo_trigger_workflow(workspace_id: int, workflow_key: str) -> object:
     )
 
 
+def _inbox_summary(entry: dict) -> dict:
+    """What the entry is and what it asks, never its body."""
+    payload = entry.get("payload") or {}
+    proposal = payload.get(_PAYLOAD_PROPOSAL)
+    return {
+        "id": entry.get("id"),
+        "kind": entry.get("kind"),
+        "status": entry.get("status"),
+        "title": payload.get("title"),
+        "anchor": proposal.get("anchor") if isinstance(proposal, dict) else None,
+    }
+
+
 @mcp.tool()
-def relebo_inbox(workspace_id: int) -> object:
-    """List the user's Relebo inbox for a workspace (approvals, tasks, escalations)."""
-    return _request("GET", f"/workspaces/{workspace_id}/inbox")
+def relebo_inbox(
+    workspace_id: int, status: InboxStatusE | None = InboxStatusE.PENDING
+) -> object:
+    """List the user's Relebo inbox for a workspace, one compact entry each: id, kind,
+    status, title and, for rubric proposals, the anchor. status: 'pending' (default),
+    'approved', 'rejected', 'cancelled', 'answered' or 'expired'; null for every entry."""
+    entries = _request("GET", f"/workspaces/{workspace_id}/inbox")
+    if not isinstance(entries, list):
+        return entries
+    return [
+        _inbox_summary(entry)
+        for entry in entries
+        if status is None or entry.get("status") == status
+    ]
 
 
 @mcp.tool()
@@ -162,11 +190,8 @@ def relebo_pause_capture() -> object:
     return {"run_id": run_id, "paused": True, "engine": result}
 
 
-@mcp.tool()
-def relebo_recall(query: str) -> object:
-    """Pull the coding rules and project facts that a piece of work calls for — call it
-    before touching an area of the project you have not read rules or facts about in
-    this session. query: what you are about to do, in plain words."""
+def _current_run_id() -> int | dict:
+    """The engine run of the newest session on this machine, or a readable error."""
     sessions = sorted(
         (p for p in _SESSIONS_DIR.glob("*.json") if not p.name.endswith(".cursor.json")),
         key=lambda p: p.stat().st_mtime,
@@ -176,7 +201,74 @@ def relebo_recall(query: str) -> object:
     run_id = json.loads(sessions[-1].read_text()).get("run_id")
     if run_id is None:
         return {"error": "the current session has no engine run"}
+    return run_id
+
+
+@mcp.tool()
+def relebo_recall(query: str) -> object:
+    """Pull the coding rules and project facts that a piece of work calls for — call it
+    before touching an area of the project you have not read rules or facts about in
+    this session. query: what you are about to do, in plain words."""
+    run_id = _current_run_id()
+    if isinstance(run_id, dict):
+        return run_id
     return _request("POST", f"/machine/sessions/{run_id}/recall", {"query": query, "prompt": query})
+
+
+def _candidate(rule: str, why: str, violation: str) -> str:
+    """The proposal body in the shape every rubric rule carries."""
+    return (
+        f"- **Rule:** {rule.strip()}\n"
+        f"- **Why:** {why.strip()}\n"
+        f"- **Violation looks like:** {violation.strip()}"
+    )
+
+
+@mcp.tool()
+def relebo_propose_rule(
+    anchor: str,
+    applies_when: str,
+    rule: str,
+    why: str,
+    violation: str,
+    scope: RuleScopeE = RuleScopeE.PERSONAL,
+) -> object:
+    """Propose a rubric rule without writing it in the final message. scope 'system': a
+    rule about how Relebo or its agents behave for any user — consolidated for the Relebo
+    maintainers, the user is only notified. scope 'personal': filed in the user's own Inbox.
+    All five fields are required: anchor (kebab-case), applies_when (the moment it applies),
+    rule, why (the user's words or the traced failure) and violation (what breaking it looks
+    like). After calling it, end the message with the one-line marker the result carries,
+    never with the full block."""
+    if not all(part.strip() for part in (anchor, applies_when, rule, why, violation)):
+        return {"error": "anchor, applies_when, rule, why and violation are all required"}
+    run_id = _current_run_id()
+    if isinstance(run_id, dict):
+        return run_id
+    filed = _request(
+        "POST",
+        f"/machine/sessions/{run_id}/proposals",
+        {
+            "anchor": anchor.strip(),
+            "section": scope.section(),
+            "applies_when": applies_when.strip(),
+            "candidate": _candidate(rule, why, violation),
+        },
+    )
+    if not isinstance(filed, list):
+        return filed
+    marker = f"Rubric addition ({scope.value}) [{anchor.strip()}]"
+    return {
+        "filed": filed,
+        "marker": marker if filed else None,
+        "note": (
+            "Filed for the Relebo maintainers; the user is only notified."
+            if scope is RuleScopeE.SYSTEM and filed
+            else "Awaiting the user in their Inbox."
+            if filed
+            else "Nothing filed: a duplicate or an identical pending proposal already exists."
+        ),
+    }
 
 
 if __name__ == "__main__":
