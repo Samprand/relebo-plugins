@@ -41,7 +41,7 @@ claude plugin uninstall relebo@relebo
 | `relebo_inbox` | List your inbox |
 | `relebo_decide_inbox` | Put a pending approval or rubric proposal in front of the user (Claude Code's permission dialog is the decision) |
 | `relebo_knowledge_subjects` / `relebo_knowledge_pieces` | Read knowledge |
-| `relebo_save_knowledge` | Save knowledge in the personal workspace (teams receive it only when the user shares it) |
+| `relebo_save_knowledge` | Save knowledge in the personal workspace, as the project's or the user's own (a team receives the project's only when the user moves the topic) |
 | `relebo_pause_capture` | Stop saving knowledge from the current session |
 
 Auth order: machine identity (`~/.relebo/machine.json`, never expires) →

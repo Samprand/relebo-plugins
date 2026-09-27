@@ -34,7 +34,8 @@ import _guards  # noqa: E402
 
 _REPO_MEMORY_RE = re.compile(r"/\.claude/projects/[^/]+/memory(/|$)")
 _COMMIT_MESSAGE_RE = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
-_ACTION_GATE_TIMEOUT_S = 25
+# One CLI run on the machine's engine sits in front of the command: its start-up counts.
+_ACTION_GATE_TIMEOUT_S = 50
 # How long the hook waits for the human's Inbox decision before parking the action.
 # Below the hook timeout in hooks.json so a slow answer degrades to "pending", never to
 # a killed hook.

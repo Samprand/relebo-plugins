@@ -28,7 +28,9 @@ _MAX_TOOL_CHARS = 400
 _MAX_PROMPT_CHARS = 4000
 _MAX_RECEIPT_CHARS = 300
 _MAX_BLOCKS_PER_TURN = 3
-_GATE_TIMEOUT_S = 90
+# The judge answers on the machine's own engine now, and a turn that states durable
+# knowledge captures and reconciles behind the same request: three CLI runs in a row.
+_GATE_TIMEOUT_S = 200
 _MAX_FILES = 12
 _MAX_FILE_CHARS = 6000
 _MAX_TOTAL_FILE_CHARS = 40000

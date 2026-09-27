@@ -17,8 +17,10 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
    ask you to relay; a "sí" in the chat is that request, the dialog is the approval.
 4. `relebo_save_knowledge` writes to the user's personal memory only: save what the user
    explicitly asked to keep, under the project or topic they named (or propose one and
-   confirm). Knowledge reaches a team only by the user's own act — sharing it from
-   Knowledge in the app, or approving the share suggestion in their Inbox — never from here.
+   confirm), saying whose it is — `project` for the project's own truth or decision,
+   `personal` for the user's own craft or preference. Knowledge reaches a team only by the
+   user's own act — moving the topic from Knowledge in the app, or approving the share
+   suggestion in their Inbox — never from here; what is theirs never leaves.
 5. Knowledge read from Relebo may be stale or perishable — treat it as context, not ground
    truth, and say where it came from.
 6. Relebo distills knowledge from every session by default. When the user says this
@@ -30,7 +32,8 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
 
 - "dispara/corre el workflow X" → `relebo_workflows` (find the key) → `relebo_trigger_workflow`.
 - "¿qué tengo pendiente en relebo?" → `relebo_inbox` per workspace, summarize pending entries.
-- "guarda esto" / "recuerda que…" → confirm subject + kind, then `relebo_save_knowledge`.
+- "guarda esto" / "recuerda que…" → confirm subject + kind + whose it is, then
+  `relebo_save_knowledge`.
 - "guarda esto en el conocimiento del equipo" → save it the same way, then tell the user to
   share it from Knowledge (the topic's "Share with team") — you cannot land it in the team.
 - "¿qué sabemos de X?" → `relebo_knowledge_subjects` → `relebo_knowledge_pieces`.

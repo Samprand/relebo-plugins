@@ -8,6 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _client  # noqa: E402
 
+_CLOSE_TIMEOUT_S = 280
+
 
 def main() -> None:
     payload = json.loads(sys.stdin.read() or "{}")
@@ -17,7 +19,9 @@ def main() -> None:
         return
     _client.cancel_dismissed_dialogs(claude_session_id)
     _client.flush_spool(claude_session_id, run_id)
-    _client.post(f"/machine/sessions/{run_id}/close", {})
+    # The close digests the session on the machine's engine: capture, reconcile and the
+    # rubric proposals its blocks earned, each one CLI run.
+    _client.post(f"/machine/sessions/{run_id}/close", {}, timeout=_CLOSE_TIMEOUT_S)
 
 
 if __name__ == "__main__":

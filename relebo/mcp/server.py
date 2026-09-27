@@ -149,10 +149,13 @@ def relebo_knowledge_pieces(
 
 
 @mcp.tool()
-def relebo_save_knowledge(subject: str, content: str, kind: str) -> object:
+def relebo_save_knowledge(subject: str, content: str, kind: str, ownership: str) -> object:
     """Save a knowledge piece in the user's personal workspace, under the project or topic it
-    belongs to. kind: 'atom' (short fact), 'doc' or 'record'. Nothing reaches a team from
-    here: the user shares it from Knowledge, or approves the suggestion in their Inbox."""
+    belongs to. kind: 'atom' (short fact), 'doc' or 'record'. ownership: who keeps it if the
+    user leaves tomorrow — 'project' (the project's or team's own decision, truth, environment
+    or vocabulary) or 'personal' (the user's own craft, preference or way of working). Nothing
+    reaches a team from here: the user moves the topic from Knowledge, or approves the
+    suggestion in their Inbox."""
     workspaces = _request("GET", "/workspaces")
     if not isinstance(workspaces, list):
         return workspaces
@@ -162,7 +165,7 @@ def relebo_save_knowledge(subject: str, content: str, kind: str) -> object:
     return _request(
         "POST",
         f"/workspaces/{personal['id']}/knowledge",
-        {"subject": subject, "content": content, "kind": kind},
+        {"subject": subject, "content": content, "kind": kind, "ownership": ownership},
     )
 
 
