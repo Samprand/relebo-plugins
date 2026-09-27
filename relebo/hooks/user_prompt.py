@@ -92,10 +92,27 @@ def _decided_approvals(claude_session_id: str, transcript_path: str) -> list[str
     return lines
 
 
+# What the harness injects as a user turn — a background task's notice, a shell command's
+# output — is nobody's statement: it earns no recall and never reaches the ledger.
+_HARNESS_PREFIXES = (
+    "<task-notification>",
+    "<system-reminder>",
+    "<command-name>",
+    "<local-command",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+)
+
+
+def _is_harness_message(prompt: str) -> bool:
+    return prompt.lstrip().startswith(_HARNESS_PREFIXES)
+
+
 def main() -> None:
     payload = json.loads(sys.stdin.read() or "{}")
     prompt = (payload.get("prompt") or "")[:_MAX_PROMPT_CHARS]
-    if not prompt.strip():
+    if not prompt.strip() or _is_harness_message(prompt):
         return
     claude_session_id = payload.get("session_id", "")
     _client.ensure_session(claude_session_id, payload.get("cwd", ""))

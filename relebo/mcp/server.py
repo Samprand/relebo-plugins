@@ -20,6 +20,8 @@ _STATE_PATH = Path.home() / ".relebo" / "machine.json"
 _SESSIONS_DIR = Path.home() / ".relebo" / "sessions"
 _DEFAULT_ENGINE_URL = "http://127.0.0.1:8100"
 _PERSONAL_KIND = "personal"
+# The levels a person files by hand, as the engine numbers them.
+_LEVEL_BY_NAME = {"fact": 1, "concept": 2}
 _PAYLOAD_PROPOSAL = "proposal"
 
 mcp = MCPServer("relebo")
@@ -141,7 +143,7 @@ def relebo_knowledge_pieces(
     subject_id: int, level: int | None = None, page_index: int = 0, page_size: int = 20
 ) -> object:
     """List the knowledge pieces stored under a subject, one page at a time.
-    level: 3 rules, 2 docs, 1 facts, 0 notes; omit for all."""
+    level: 3 foundations, 2 concepts, 1 facts, 0 percepts; omit for all."""
     query = f"?page_index={page_index}&page_size={page_size}"
     if level is not None:
         query += f"&level={level}"
@@ -149,13 +151,15 @@ def relebo_knowledge_pieces(
 
 
 @mcp.tool()
-def relebo_save_knowledge(subject: str, content: str, kind: str, ownership: str) -> object:
+def relebo_save_knowledge(subject: str, content: str, level: str, ownership: str) -> object:
     """Save a knowledge piece in the user's personal workspace, under the project or topic it
-    belongs to. kind: 'atom' (short fact), 'doc' or 'record'. ownership: who keeps it if the
-    user leaves tomorrow — 'project' (the project's or team's own decision, truth, environment
-    or vocabulary) or 'personal' (the user's own craft, preference or way of working). Nothing
-    reaches a team from here: the user moves the topic from Knowledge, or approves the
-    suggestion in their Inbox."""
+    belongs to. level: 'fact' (one durable truth in a line) or 'concept' (a longer document
+    about the subject). ownership: who keeps it if the user leaves tomorrow — 'project' (the
+    project's or team's own decision, truth, environment or vocabulary) or 'personal' (the
+    user's own craft, preference or way of working). Nothing reaches a team from here: the
+    user moves the topic from Knowledge, or approves the suggestion in their Inbox."""
+    if level not in _LEVEL_BY_NAME:
+        return {"error": "level must be 'fact' or 'concept'"}
     workspaces = _request("GET", "/workspaces")
     if not isinstance(workspaces, list):
         return workspaces
@@ -165,7 +169,12 @@ def relebo_save_knowledge(subject: str, content: str, kind: str, ownership: str)
     return _request(
         "POST",
         f"/workspaces/{personal['id']}/knowledge",
-        {"subject": subject, "content": content, "kind": kind, "ownership": ownership},
+        {
+            "subject": subject,
+            "content": content,
+            "level": _LEVEL_BY_NAME[level],
+            "ownership": ownership,
+        },
     )
 
 

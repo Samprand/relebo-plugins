@@ -32,7 +32,7 @@ Relebo runs the user's recurring work. You have MCP tools (`relebo_*`) against t
 
 - "dispara/corre el workflow X" → `relebo_workflows` (find the key) → `relebo_trigger_workflow`.
 - "¿qué tengo pendiente en relebo?" → `relebo_inbox` per workspace, summarize pending entries.
-- "guarda esto" / "recuerda que…" → confirm subject + kind + whose it is, then
+- "guarda esto" / "recuerda que…" → confirm subject + level (fact or concept) + whose it is, then
   `relebo_save_knowledge`.
 - "guarda esto en el conocimiento del equipo" → save it the same way, then tell the user to
   share it from Knowledge (the topic's "Share with team") — you cannot land it in the team.
