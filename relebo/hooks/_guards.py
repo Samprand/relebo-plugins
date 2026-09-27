@@ -98,6 +98,10 @@ EFFECT_DESTRUCTIVE = "destructive"
 EFFECT_REMOTE = "remote"
 EFFECT_SHARED_REPO = "shared-repo"
 EFFECT_KNOWLEDGE_BYPASS = "knowledge-bypass"
+# ~/.relebo is the machine's own home: the runner, its engines and their sign-ins, the
+# supervisor's sessions and spool. The worker reads it and never writes it, or it could
+# reshape the supervisor that gates it. The app and the runner write there, never a session.
+EFFECT_MACHINE_HOME = "machine-home"
 SUBCOMMAND_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 ENV_PREFIX_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+")
 SUDO_PREFIX_RE = re.compile(r"^sudo\s+(?:-\S+\s+)*")
@@ -139,6 +143,32 @@ KNOWLEDGE_BYPASS_RES = (
     ),
 )
 MAX_EFFECT_COMMAND_CHARS = 400
+# The home in every spelling a shell or PowerShell line may carry.
+MACHINE_HOME_PATH = (
+    r"(?:~|\$\{?HOME\}?|/Users/[^/\s'\"]+|/home/[^/\s'\"]+|%USERPROFILE%|\$env:USERPROFILE)"
+    r"[/\\]\.relebo(?=[/\\\s'\"]|$)"
+)
+MACHINE_HOME_PATH_RE = re.compile(MACHINE_HOME_PATH, re.I)
+MACHINE_HOME_WRITE_RES = (
+    # a redirect or tee into the home
+    re.compile(r"(?:>>?|\btee\b(?:\s+-\S+)*)\s*['\"]?" + MACHINE_HOME_PATH, re.I),
+    # a writing verb with the home among its arguments
+    re.compile(
+        r"^(?:rm|rmdir|mv|cp|ln|chmod|chown|mkdir|touch|truncate|dd|install|"
+        r"Remove-Item|Move-Item|Copy-Item|New-Item|Set-Content|Add-Content|Out-File|"
+        r"del|erase|rd|ri|md)\b.*" + MACHINE_HOME_PATH,
+        re.I,
+    ),
+    # an in-place edit
+    re.compile(r"^(?:sed|perl)\b.*\s-i\b.*" + MACHINE_HOME_PATH, re.I),
+)
+
+
+def writes_machine_home(part: str) -> bool:
+    """A subcommand that writes under ~/.relebo; reading it (cat, ls, tail, grep) is not."""
+    return bool(MACHINE_HOME_PATH_RE.search(part)) and any(
+        rule.search(part) for rule in MACHINE_HOME_WRITE_RES
+    )
 
 
 def _rm_is_destructive(part: str) -> bool:
@@ -159,6 +189,8 @@ def command_effects(command: str) -> list[dict]:
         effect = None
         if any(rule.search(part) for rule in KNOWLEDGE_BYPASS_RES):
             effect = EFFECT_KNOWLEDGE_BYPASS
+        elif writes_machine_home(part):
+            effect = EFFECT_MACHINE_HOME
         elif _rm_is_destructive(part) or any(rule.search(part) for rule in DESTRUCTIVE_RES):
             effect = EFFECT_DESTRUCTIVE
         elif any(rule.search(part) for rule in REMOTE_RES):

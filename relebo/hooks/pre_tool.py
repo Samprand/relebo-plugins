@@ -16,6 +16,9 @@
 - File writes: Claude Code's per-repo auto-memory is where an agent without a memory
   tool parks what the user just said. Relebo already captures it from the session, and
   the rubric forbids that store — so the write is denied at the tool, not after the turn.
+  ~/.relebo is the machine's own home — the runner, its engines, the supervisor's
+  sessions — and the worker never writes it, from a shell line or an edit tool: it
+  could reshape the supervisor that gates it.
   Every other write runs the rubric's mechanical guards (relative import, enum suffix,
   top-level util function, second principal definition) on the pending content: a hit
   asks the human before the file changes, instead of the Stop gate correcting it after.
@@ -96,6 +99,16 @@ def _gate_command(payload: dict, tool_input: dict) -> None:
             "Relebo supervisor: destructive action denied — "
             + "; ".join(destructive)
             + ". Irreversible commands never run from a session; the user runs them by hand.",
+        )
+        return
+    home = [item["command"] for item in effects if item["effect"] == _guards.EFFECT_MACHINE_HOME]
+    if home:
+        _decide(
+            _DECISION_DENY,
+            "Relebo supervisor: write into the machine's home denied — "
+            + "; ".join(home)
+            + ". ~/.relebo belongs to the runner and the supervisor: a session reads it, never "
+            "writes it; the app and the runner do.",
         )
         return
     bypass = [item["command"] for item in effects if item["effect"] == _guards.EFFECT_KNOWLEDGE_BYPASS]
@@ -222,6 +235,19 @@ def _guard_memory_write(tool_input: dict) -> bool:
     return True
 
 
+def _guard_machine_home_write(tool_input: dict) -> bool:
+    file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    if not _guards.MACHINE_HOME_PATH_RE.search(file_path):
+        return False
+    _decide(
+        _DECISION_DENY,
+        f"{file_path} is under ~/.relebo, the machine's own home: the runner, its engines, "
+        "the supervisor's sessions. A session reads it, never writes it; the app and the "
+        "runner do.",
+    )
+    return True
+
+
 def _edit_findings(tool: str, tool_input: dict, anchors: set[str]) -> list[dict]:
     """Guard findings on the content about to be written. A Write carries the file's whole
     final shape, so the one-definition guard reads it too; an Edit is a fragment."""
@@ -295,6 +321,8 @@ def main() -> None:
         _gate_decide(payload, tool_input)
         return
     if _guard_memory_write(tool_input):
+        return
+    if tool in _guards.EDIT_TOOLS and _guard_machine_home_write(tool_input):
         return
     if tool in _guards.EDIT_TOOLS:
         _gate_edit(tool, tool_input)
