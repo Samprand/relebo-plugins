@@ -21,6 +21,9 @@ _ANCHOR_RE = re.compile(r"^## \[([^\]]+)\]", re.MULTILINE)
 
 _ORPHAN_IDLE_S = 2 * 60 * 60
 _TIMEOUT_S = 60
+# A request the turn cannot do without — the prompt's ledger entry, its recall — is tried
+# once more before it is given up on; the engine's hiccups are shorter than a turn.
+POST_ATTEMPTS = 2
 SHADOW = "shadow"
 ENFORCE = "enforce"
 _GATE_MODE_DEFAULT = SHADOW
@@ -67,11 +70,22 @@ def rubric_context() -> str:
     return os.environ.get("CLAUDE_PLUGIN_OPTION_RUBRIC_CONTEXT") or _RUBRIC_CONTEXT_DEFAULT
 
 
-def post(path: str, body: dict, timeout: float = _TIMEOUT_S) -> dict | None:
-    """POST to the engine; None on any failure — hooks never raise."""
+def post(
+    path: str, body: dict, timeout: float = _TIMEOUT_S, attempts: int = 1
+) -> dict | None:
+    """POST to the engine; None on any failure — hooks never raise. With more than one
+    attempt, a failed request is sent again until one answers or the attempts run out."""
     key = machine_key()
     if not key:
         return None
+    for _ in range(attempts - 1):
+        answer = _post_once(path, body, key, timeout)
+        if answer is not None:
+            return answer
+    return _post_once(path, body, key, timeout)
+
+
+def _post_once(path: str, body: dict, key: str, timeout: float) -> dict | None:
     request = urllib.request.Request(
         f"{engine_url()}{path}",
         data=json.dumps(body).encode(),
@@ -287,7 +301,10 @@ def record_event(claude_session_id: str, kind: str, turn_key: str, payload: dict
     touch_session(claude_session_id)
     event = {"kind": kind, "turn_key": turn_key, "payload": payload}
     run_id = session_run_id(claude_session_id)
-    if run_id is None or post(f"/machine/sessions/{run_id}/events", event) is None:
+    if (
+        run_id is None
+        or post(f"/machine/sessions/{run_id}/events", event, attempts=POST_ATTEMPTS) is None
+    ):
         spool_event(claude_session_id, event)
     elif run_id is not None:
         flush_spool(claude_session_id, run_id)

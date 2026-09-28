@@ -6,6 +6,7 @@ calls for."""
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -116,12 +117,34 @@ def main() -> None:
         return
     claude_session_id = payload.get("session_id", "")
     _client.ensure_session(claude_session_id, payload.get("cwd", ""))
-    _client.record_event(
-        claude_session_id,
-        "user_prompt",
-        f"prompt-{int(time.time() * 1000)}",
-        {"prompt": prompt},
-    )
+    # The ledger entry and the recall travel side by side: neither reads the other, the
+    # turn needs both, and the hook waits for both before it answers.
+    with ThreadPoolExecutor(max_workers=1) as ledger:
+        recorded = ledger.submit(
+            _client.record_event,
+            claude_session_id,
+            "user_prompt",
+            f"prompt-{int(time.time() * 1000)}",
+            {"prompt": prompt},
+        )
+        blocks = _blocks(claude_session_id, payload, prompt)
+        recorded.result()
+    if blocks:
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": "\n\n".join(blocks),
+                    }
+                }
+            )
+        )
+
+
+def _blocks(claude_session_id: str, payload: dict, prompt: str) -> list[str]:
+    """What this turn is told: decisions since the last prompt, the rules and facts it
+    calls for, and the review guards' findings."""
     blocks = []
     decided = _decided_approvals(claude_session_id, payload.get("transcript_path", ""))
     if decided:
@@ -137,7 +160,9 @@ def main() -> None:
         )
     run_id = _client.session_run_id(claude_session_id)
     recall = (
-        _client.post(f"/machine/sessions/{run_id}/recall", request)
+        _client.post(
+            f"/machine/sessions/{run_id}/recall", request, attempts=_client.POST_ATTEMPTS
+        )
         if run_id is not None and _client.rubric_context() == _client.RUBRIC_INDEX
         else None
     ) or {}
@@ -153,17 +178,7 @@ def main() -> None:
         )
     if recall.get("facts"):
         blocks.append("[Relebo project facts for this turn]\n" + "\n".join(f"- {f}" for f in recall["facts"]))
-    if blocks:
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "UserPromptSubmit",
-                        "additionalContext": "\n\n".join(blocks),
-                    }
-                }
-            )
-        )
+    return blocks
 
 
 if __name__ == "__main__":
