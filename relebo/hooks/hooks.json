@@ -1,5 +1,5 @@
 {
-  "description": "Relebo session spine: register the session, inject pinned rubric renders, capture the authorization ledger, gate effectful actions before they run.",
+  "description": "Relebo's memory in a Claude Code session: what the place remembers at arrival and on every prompt, the gate on actions, the review of a turn's changes, and the reading of what the person said.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +9,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: registering the session…"
+            "statusMessage": "Relebo: recalling this place…"
           }
         ]
       }
@@ -21,33 +21,33 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: loading rules for this turn…"
+            "statusMessage": "Relebo: recalling…"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__plugin_relebo_relebo__relebo_decide_inbox",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool.py\"",
-            "timeout": 600,
-            "statusMessage": "Relebo: gating the action…"
+            "timeout": 60,
+            "statusMessage": "Relebo: judging the action…"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "ExitPlanMode|AskUserQuestion|Bash|Edit|Write|MultiEdit|mcp__plugin_relebo_relebo__relebo_decide_inbox",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/post_tool.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: recording the result…"
+            "statusMessage": "Relebo: noting the result…"
           }
         ]
       }
@@ -57,33 +57,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_gate.py\"",
-            "timeout": 240,
-            "statusMessage": "Relebo: judging the turn…"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pre_compact.py\"",
-            "timeout": 60,
-            "statusMessage": "Relebo: saving context before compaction…"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"",
-            "timeout": 300,
-            "statusMessage": "Relebo: closing the session…"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop.py\"",
+            "timeout": 90,
+            "statusMessage": "Relebo: closing the turn…"
           }
         ]
       }

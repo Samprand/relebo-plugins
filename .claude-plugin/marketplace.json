@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "relebo",
-      "description": "Relebo from Claude Code: workflows, inbox and workspace knowledge through the Relebo engine.",
+      "description": "Relebo's memory from Claude Code: what your places remember, kept and recalled through the Relebo engine.",
       "source": "./relebo"
     }
   ]

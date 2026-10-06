@@ -1,50 +1,16 @@
 # Relebo plugin for Claude Code
 
-Trigger workflows, answer your inbox and read/save workspace knowledge from any
-Claude Code session.
+The memory of your places in every Claude Code session. The hooks on this machine hold no key
+to anything: they tell the Relebo engine what they see (the repository's remote, the folder's
+name, what you said, the action about to happen, what the turn changed) and the engine answers
+as you, by your machine's key or your session token.
 
-## Install (from Claude Code — the only supported path)
+- **SessionStart**: what the place you are in remembers, and what holds everywhere.
+- **UserPromptSubmit**: what your words bring to mind; what you said is read in the background.
+- **PreToolUse**: an action is judged against the rules of the place before it runs. An action
+  the memory cannot judge is put to you.
+- **PostToolUse**: what the place remembers about what was just done.
+- **Stop**: the lines the turn changed are reviewed; a question the reading opened is put.
 
-```bash
-claude plugin marketplace add Samprand/relebo-plugins
-claude plugin install relebo@relebo
-```
-
-Claude Code shows a config dialog on install:
-
-- **Engine URL** — leave empty on a registered device: the machine identity in
-  `~/.relebo/machine.json` already carries the engine address and never
-  expires. Set it only on devices without a registered Relebo machine.
-- **Session token** — only for unregistered devices (copy from the Relebo app;
-  expires ~1h).
-- **Gate mode** — `shadow` (default) judges every turn and audits the verdict
-  but never blocks: a one-line receipt says what would have blocked. `enforce`
-  blocks the turn with the findings (bounded retries, then the unresolved
-  findings escalate to your Inbox). Start in shadow, switch to enforce once the
-  verdicts agree with what you would have flagged.
-
-Requirements: `uv` (the MCP server runs with it, nothing to install manually).
-
-## Uninstall
-
-```bash
-claude plugin uninstall relebo@relebo
-```
-
-## Tools
-
-| Tool | What it does |
-|---|---|
-| `relebo_workspaces` | List your workspaces |
-| `relebo_workflows` | List a workspace's workflows |
-| `relebo_trigger_workflow` | Run a workflow |
-| `relebo_inbox` | List your inbox |
-| `relebo_decide_inbox` | Put a pending approval or rubric proposal in front of the user (Claude Code's permission dialog is the decision) |
-| `relebo_knowledge_subjects` / `relebo_knowledge_pieces` | Read knowledge |
-| `relebo_save_knowledge` | Save knowledge in the personal workspace, as the project's or the user's own (a team receives the project's only when the user moves the topic) |
-| `relebo_pause_capture` | Stop saving knowledge from the current session |
-
-Auth order: machine identity (`~/.relebo/machine.json`, never expires) →
-`RELEBO_TOKEN` (session token, ~1h). Local development without the
-marketplace: `claude --plugin-dir /path/to/Relebo/plugin/claude-code/relebo`
-with `RELEBO_ENGINE_URL`/`RELEBO_TOKEN` exported.
+Where each project is on this machine is kept in `~/.relebo/memory/places.json`; the hooks'
+log is `~/.relebo/memory/hooks.log`.

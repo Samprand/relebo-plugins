@@ -1,335 +1,56 @@
-"""PreToolUse: the machine-scope supervisor's gate BEFORE an action runs.
-
-- Shell commands: each subcommand is classified by effect. Destructive ones are denied
-  here, deterministically. Remote (push, deploy, release, secrets, production database)
-  and shared-repo (commit, merge) effects go to the engine's action gate, which judges
-  them against the session's authorization ledger and the applicable rules: allow runs,
-  deny stops, ask opens an Inbox approval and puts it in front of the human as Claude
-  Code's native permission dialog (approving runs the command and the post hook records
-  the decision; dismissing it — Esc or decline — runs nothing and cancels the entry at the
-  next prompt or the session's end); only under bypassPermissions, which exists to skip
-  prompts, the action parks until the human answers in the Inbox.
-  Without the engine the action asks the terminal: never a silent pass.
-- The Relebo decide tool: always behind the native dialog, so adopting a rubric proposal
-  or answering an approval is the user's click, never the agent's call. Dismissing that
-  dialog cancels the entry: a dismissal is not a rejection.
-- File writes: Claude Code's per-repo auto-memory is where an agent without a memory
-  tool parks what the user just said. Relebo already captures it from the session, and
-  the rubric forbids that store — so the write is denied at the tool, not after the turn.
-  ~/.relebo is the machine's own home — the runner, its engines, the supervisor's
-  sessions — and the worker never writes it, from a shell line or an edit tool: it
-  could reshape the supervisor that gates it.
-  Every other write runs the rubric's mechanical guards (relative import, enum suffix,
-  top-level util function, second principal definition) on the pending content: a hit
-  asks the human before the file changes, instead of the Stop gate correcting it after.
-"""
-
-import json
-import re
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _client  # noqa: E402
-import _git  # noqa: E402
-import _guards  # noqa: E402
 
-_REPO_MEMORY_RE = re.compile(r"/\.claude/projects/[^/]+/memory(/|$)")
-_COMMIT_MESSAGE_RE = re.compile(r"""-m\s+(?:"([^"]*)"|'([^']*)'|(\S+))""")
-# One CLI run on the machine's engine sits in front of the command: its start-up counts.
-_ACTION_GATE_TIMEOUT_S = 50
-# How long the hook waits for the human's Inbox decision before parking the action.
-# Below the hook timeout in hooks.json so a slow answer degrades to "pending", never to
-# a killed hook.
-_APPROVAL_WAIT_S = 540
-_APPROVAL_POLL_S = 5
-_STATUS_APPROVED = "approved"
-_STATUS_PENDING = "pending"
-_MAX_COMMAND_CHARS = 2000
-_MAX_CHANGES_CHARS = 4000
-_DECISION_ASK = "ask"
-_DECISION_DENY = "deny"
-# An "ask" from this hook opens Claude Code's permission dialog in default, acceptEdits and
-# auto mode (verified 2026-09-08: auto showed it and the click ran the command). Only
-# bypassPermissions exists to skip prompts, so there the Inbox stays the only path.
-_NO_DIALOG_MODES = ("bypassPermissions",)
-_VIA_DIALOG = "dialog"
-_DECIDE_TOOL = "mcp__plugin_relebo_relebo__relebo_decide_inbox"
-_DECISIONS = ("approve", "reject")
+import _client
+import _situation
+
+HOOK = "pre_tool"
+OWN_MEMORY_REFUSED = (
+    "Do not save memories yourself. What the person teaches is read when the turn ends and "
+    "remembered by Relebo's memory. Just answer the person."
+)
+# the gate fails closed: an action the memory could not judge goes to the person
+UNREACHED = (
+    "Relebo's memory could not judge this action (the engine did not answer). "
+    "Ask the person before doing it."
+)
 
 
-def _decide(decision: str, reason: str) -> None:
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": decision,
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
+def own_memory(payload: dict) -> bool:
+    """Claude Code's own notebook would hide what the memory did not keep."""
+    target = str((payload.get("tool_input") or {}).get("file_path") or "")
+    return "/.claude/projects/" in target and "/memory/" in target
+
+
+def judge(payload: dict) -> None:
+    if own_memory(payload):
+        _client.permission("deny", OWN_MEMORY_REFUSED)
+        return
+    if not _client.identified():
+        return
+    answer = _client.post(
+        "/memory/sessions/action", _situation.action_of(payload), timeout=_client.GATE_TIMEOUT_S
     )
-
-
-def _pending_changes(cwd: str, command: str) -> dict:
-    """What a commit would carry: the tree state now (a `git add` in the same line has
-    not run yet, so staged alone would understate it) and the message on the line."""
-    message = ""
-    match = _COMMIT_MESSAGE_RE.search(command)
-    if match:
-        message = next(group for group in match.groups() if group is not None)
-    return {
-        "status": _git.run(cwd, "status", "--porcelain")[:_MAX_CHANGES_CHARS],
-        "diff_stat": _git.run(cwd, "diff", "HEAD", "--stat")[:_MAX_CHANGES_CHARS],
-        "message": message,
-    }
-
-
-def _gate_command(payload: dict, tool_input: dict) -> None:
-    command = tool_input.get("command") or ""
-    effects = _guards.command_effects(command)
-    if not effects:
+    if not answer:
+        _client.permission("ask", UNREACHED)
         return
-    destructive = [item["command"] for item in effects if item["effect"] == _guards.EFFECT_DESTRUCTIVE]
-    if destructive:
-        _decide(
-            _DECISION_DENY,
-            "Relebo supervisor: destructive action denied — "
-            + "; ".join(destructive)
-            + ". Irreversible commands never run from a session; the user runs them by hand.",
-        )
-        return
-    home = [item["command"] for item in effects if item["effect"] == _guards.EFFECT_MACHINE_HOME]
-    if home:
-        _decide(
-            _DECISION_DENY,
-            "Relebo supervisor: write into the machine's home denied — "
-            + "; ".join(home)
-            + ". ~/.relebo belongs to the runner and the supervisor: a session reads it, never "
-            "writes it; the app and the runner do.",
-        )
-        return
-    bypass = [item["command"] for item in effects if item["effect"] == _guards.EFFECT_KNOWLEDGE_BYPASS]
-    if bypass:
-        _decide(
-            _DECISION_DENY,
-            "Relebo supervisor: knowledge bypass denied — "
-            + "; ".join(bypass)
-            + ". Rules and approvals reach Relebo only through the Inbox: end the turn with a "
-            "Rubric addition block, or ask the user to decide there.",
-        )
-        return
-    session_id = payload.get("session_id", "")
-    cwd = payload.get("cwd", "")
-    action = {
-        "command": command[:_MAX_COMMAND_CHARS],
-        "effects": effects,
-        "cwd": cwd,
-        "description": (tool_input.get("description") or "")[:_MAX_COMMAND_CHARS],
-        "changes": {},
-    }
-    if any(item["command"].startswith("git commit") for item in effects):
-        action["changes"] = _pending_changes(cwd, command)
-    summary = "; ".join(item["command"] for item in effects)
-    run_id = _client.ensure_session(session_id, cwd)
-    verdict = (
-        _client.post(f"/machine/sessions/{run_id}/gate-action", action, timeout=_ACTION_GATE_TIMEOUT_S)
-        if run_id is not None
-        else None
-    )
-    if verdict is None:
-        _decide(
-            _DECISION_ASK,
-            f"Relebo supervisor unreachable — confirm this remote action yourself: {summary}",
-        )
-        return
-    mode = verdict.get("mode") or _client.session_gate_mode(session_id)
-    if mode != _client.ENFORCE:
-        # Shadow: judged and audited, never in the way.
-        return
-    decision = verdict.get("decision")
-    detail = verdict.get("summary") or summary
-    reason = verdict.get("reason") or ""
-    if decision == _DECISION_DENY:
-        _decide(_DECISION_DENY, f"Relebo supervisor: {detail}" + (f" — {reason}" if reason else ""))
-    elif decision == _DECISION_ASK:
-        entry = verdict.get("inbox_entry_id")
-        if entry and payload.get("permission_mode") not in _NO_DIALOG_MODES:
-            # The native permission dialog is the form: the user approves or dismisses it by
-            # hand. Approving runs the command and post_tool relays the decision to the
-            # Inbox entry; dismissing (Esc or decline) runs nothing, and the next prompt or
-            # the session's end cancels the entry — a dismissal is not a rejection.
-            _client.record_pending_approval(
-                session_id,
-                {
-                    "entry_id": entry,
-                    "run_id": run_id,
-                    "command": action["command"],
-                    "summary": detail,
-                    "tool_use_id": payload.get("tool_use_id") or "",
-                    "via": _VIA_DIALOG,
-                },
-            )
-            _decide(
-                _DECISION_ASK,
-                f"Relebo supervisor: {detail} Inbox entry #{entry}. Approving here runs the "
-                "command and records your decision; Esc or declining cancels the request.",
-            )
-            return
-        # No dialog in this permission mode: the human decides in the Inbox. The hook waits
-        # for that decision: approved runs the command right now, rejected or lapsed denies
-        # it, and only a long silence parks it for a later rerun the ledger will let through.
-        outcome = _await_decision(run_id, entry) if entry else _STATUS_PENDING
-        if outcome == _STATUS_APPROVED:
-            return
-        where = f"Inbox entry #{entry}" if entry else "your Inbox"
-        if outcome == _STATUS_PENDING:
-            if entry:
-                _client.record_pending_approval(
-                    session_id,
-                    {"entry_id": entry, "run_id": run_id, "command": action["command"], "summary": detail},
-                )
-            watcher = Path(__file__).resolve().parent / "approval_watch.py"
-            _decide(
-                _DECISION_DENY,
-                f"Relebo supervisor: {detail} Awaiting the user's decision in {where}. Do not "
-                "run this command again now. To resume without the user, arm the Monitor tool "
-                f"with `python3 {watcher} {run_id} {entry}` (persistent): it prints one line "
-                "when the decision lands; on `approved` run the exact same command, on "
-                "`rejected`, `cancelled` or `expired` stop and tell the user. Then continue with "
-                "other work.",
-            )
-            return
-        _decide(
-            _DECISION_DENY,
-            f"Relebo supervisor: {detail} The user marked {where} as {outcome}; do not retry "
-            "this action or a variant of it.",
-        )
-
-
-def _await_decision(run_id: int, entry_id: int) -> str:
-    """Polls the approval until the human answers or the wait budget ends."""
-    deadline = time.monotonic() + _APPROVAL_WAIT_S
-    while time.monotonic() < deadline:
-        current = _client.get(f"/machine/sessions/{run_id}/approvals/{entry_id}")
-        status = (current or {}).get("status") or _STATUS_PENDING
-        if status != _STATUS_PENDING:
-            return status
-        time.sleep(_APPROVAL_POLL_S)
-    return _STATUS_PENDING
-
-
-def _guard_memory_write(tool_input: dict) -> bool:
-    file_path = tool_input.get("file_path") or ""
-    if not _REPO_MEMORY_RE.search(file_path):
-        return False
-    _decide(
-        _DECISION_DENY,
-        f"{file_path} is Claude Code's per-repo memory, which this project does "
-        "not use: Relebo captures what the user states from the session by "
-        "itself. Do not persist it by hand; when the user asks to keep something "
-        "for the team, call relebo_save_knowledge.",
-    )
-    return True
-
-
-def _guard_machine_home_write(tool_input: dict) -> bool:
-    file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-    if not _guards.MACHINE_HOME_PATH_RE.search(file_path):
-        return False
-    _decide(
-        _DECISION_DENY,
-        f"{file_path} is under ~/.relebo, the machine's own home: the runner, its engines, "
-        "the supervisor's sessions. A session reads it, never writes it; the app and the "
-        "runner do.",
-    )
-    return True
-
-
-def _edit_findings(tool: str, tool_input: dict, anchors: set[str]) -> list[dict]:
-    """Guard findings on the content about to be written. A Write carries the file's whole
-    final shape, so the one-definition guard reads it too; an Edit is a fragment."""
-    edit = {"tool": tool, "input": tool_input}
-    path = tool_input.get("file_path") or ""
-    findings = _guards.code_guards([edit])
-    if tool == "Write" and path:
-        findings += _guards.principal_definition_guards(
-            [path], texts={path: tool_input.get("content") or ""}
-        )
-    return [finding for finding in findings if finding["anchor"] in anchors]
-
-
-def _gate_edit(tool: str, tool_input: dict) -> None:
-    findings = _edit_findings(tool, tool_input, _client.cached_anchors())
-    if not findings:
-        return
-    _decide(
-        _DECISION_ASK,
-        "Relebo supervisor: this write breaks the rubric — "
-        + "; ".join(f"[{f['anchor']}] {f['evidence']} Fix: {f['fix']}" for f in findings)
-        + ". Approve to write it as is, or decline and fix it first.",
-    )
-
-
-def _gate_decide(payload: dict, tool_input: dict) -> None:
-    """The decide tool is the agent's way to put a proposal or approval in front of the
-    user; the answer is the user's click in the dialog, so without a dialog it does not run.
-    Allowing runs the tool, which answers the entry, and post_tool forgets the parked call;
-    dismissing the dialog runs nothing, so the next prompt or the session's end cancels the
-    entry."""
-    entry_id = tool_input.get("entry_id")
-    verb = str(tool_input.get("decision") or "")
-    if verb not in _DECISIONS or not entry_id:
-        _decide(_DECISION_DENY, "Relebo: relebo_decide_inbox needs entry_id and decision approve|reject.")
-        return
-    if payload.get("permission_mode") in _NO_DIALOG_MODES:
-        _decide(
-            _DECISION_DENY,
-            f"Relebo: this permission mode shows no dialog, so Inbox entry #{entry_id} is "
-            "decided by the user in the Inbox, not here.",
-        )
-        return
-    session_id = payload.get("session_id", "")
-    _client.record_pending_approval(
-        session_id,
-        {
-            "entry_id": entry_id,
-            "run_id": _client.session_run_id(session_id),
-            "tool": _DECIDE_TOOL,
-            "summary": f"{verb} Inbox entry #{entry_id}",
-            "tool_use_id": payload.get("tool_use_id") or "",
-            "via": _VIA_DIALOG,
-        },
-    )
-    _decide(
-        _DECISION_ASK,
-        f"Relebo: you are about to {verb.upper()} Inbox entry #{entry_id}. Only you decide: "
-        "approving here is the decision itself; Esc or declining cancels the entry.",
-    )
-
-
-def main() -> None:
-    payload = json.loads(sys.stdin.read() or "{}")
-    tool_input = payload.get("tool_input") or {}
-    tool = payload.get("tool_name")
-    if tool == "Bash":
-        _gate_command(payload, tool_input)
-        return
-    if tool == _DECIDE_TOOL:
-        _gate_decide(payload, tool_input)
-        return
-    if _guard_memory_write(tool_input):
-        return
-    if tool in _guards.EDIT_TOOLS and _guard_machine_home_write(tool_input):
-        return
-    if tool in _guards.EDIT_TOOLS:
-        _gate_edit(tool, tool_input)
+    decision = answer.get("decision")
+    if decision == "hold":
+        _client.permission("deny", answer.get("reason") or "")
+    elif decision == "ask":
+        _client.permission("ask", answer.get("reason") or "", answer.get("context") or "")
+    else:
+        _client.context("PreToolUse", answer.get("context") or "")
 
 
 if __name__ == "__main__":
+    payload = _client.read_payload()
     try:
-        main()
-    except Exception:
-        pass
+        judge(payload)
+    except SystemExit:
+        raise
+    except BaseException as error:  # noqa: BLE001 - the gate never allows on a failure of its own
+        _client.log(HOOK + " " + type(error).__name__ + ": " + str(error)[:300])
+        _client.permission("ask", UNREACHED)

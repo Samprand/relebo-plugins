@@ -1,8 +1,8 @@
 {
   "name": "relebo",
   "displayName": "Relebo",
-  "version": "0.13.1",
-  "description": "Relebo from Claude Code: workflows, inbox and workspace knowledge through the Relebo engine.",
+  "version": "0.15.0",
+  "description": "Relebo's memory from Claude Code: what your places remember, kept and recalled through the Relebo engine.",
   "author": {
     "name": "Samprand"
   },
@@ -10,41 +10,13 @@
     "engine_url": {
       "type": "string",
       "title": "Engine URL",
-      "description": "Your Relebo engine address. Leave empty on a registered device — the machine identity in ~/.relebo/machine.json already carries it."
+      "description": "Your Relebo engine address. Leave empty on a registered device: ~/.relebo/machine.json carries it."
     },
     "token": {
       "type": "string",
       "title": "Session token",
-      "description": "Only needed on devices without a registered Relebo machine; expires ~1h.",
+      "description": "Only on a device without a registered Relebo machine.",
       "sensitive": true
-    },
-    "gate_mode": {
-      "type": "string",
-      "title": "Gate mode",
-      "description": "shadow (judge and report, never block) or enforce. Default: shadow."
-    },
-    "rubric_context": {
-      "type": "string",
-      "title": "Rubric context",
-      "description": "index (one line per rule at start; the sections and facts each turn needs arrive with every prompt) or full (whole rubric + facts at session start). Default: index."
-    }
-  },
-  "mcpServers": {
-    "relebo": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--with",
-        "mcp>=2.1",
-        "--with",
-        "httpx>=0.28",
-        "python",
-        "${CLAUDE_PLUGIN_ROOT}/mcp/server.py"
-      ],
-      "env": {
-        "RELEBO_ENGINE_URL": "${user_config.engine_url}",
-        "RELEBO_TOKEN": "${user_config.token}"
-      }
     }
   }
 }
