@@ -1,73 +1,166 @@
-"""What every hook of the Relebo plugin shares: who this machine is to the engine, how it
-posts, and where it keeps what is only this machine's. Stdlib only: hooks run on the system
-python3, which may be 3.9, so annotations stay postponed."""
+"""What every hook of the Relebo plugin shares: who this device is to the engine, how it
+posts, and where it keeps what is only this device's. Stdlib only: hooks run on the system
+python3, which may be 3.9, so annotations stay postponed.
+
+Identity is a Relebo token (rlb_…) the person approved once from the web, kept in
+~/.relebo/token.json. A plugin option or RELEBO_TOKEN wins over the file. Nothing else: the
+desktop app's machine key is gone."""
 
 from __future__ import annotations
 
 import json
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 RELEBO_DIR = Path.home() / ".relebo"
-MACHINE_FILE = RELEBO_DIR / "machine.json"
+# the token the person approved for this device, and the engine it was approved at
+TOKEN_FILE = RELEBO_DIR / "token.json"
+# a code asked for and not yet decided: what to poll and what to show the person meanwhile
+PENDING_FILE = RELEBO_DIR / "device.json"
 MEMORY_DIR = RELEBO_DIR / "memory"
 LOG_FILE = MEMORY_DIR / "hooks.log"
 PLACES_FILE = MEMORY_DIR / "places.json"
-DEFAULT_ENGINE = "http://127.0.0.1:8100"
+# the hosted engine; a device that never installed anything of Relebo reaches this one
+DEFAULT_ENGINE = "https://api.relebo.ai"
+# which of Relebo's own clients these hooks run as: Codex sets RELEBO_CLIENT=codex
+CLIENT_ID = os.environ.get("RELEBO_CLIENT") or "claude-code"
 TIMEOUT_S = 60.0
 # a hook that gates an action waits less: the person is waiting on the other side
 GATE_TIMEOUT_S = 25.0
+# asking for a code or polling it must never make a session start slow
+LOGIN_TIMEOUT_S = 10.0
 
 
-def _machine() -> dict:
+def read_json(path: Path) -> dict:
     try:
-        return json.loads(MACHINE_FILE.read_text())
+        found = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
+    return found if isinstance(found, dict) else {}
+
+
+def write_json(path: Path, data: dict) -> None:
+    """Only this user may read it, and a crash mid-write leaves the old file, not half of one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            out.write(json.dumps(data, indent=2, sort_keys=True))
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def remove(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def token() -> str:
+    return (
+        os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN")
+        or os.environ.get("RELEBO_TOKEN")
+        or read_json(TOKEN_FILE).get("access_token", "")
+    )
+
+
+def token_source() -> str | None:
+    """Where the token in use comes from: "option" (the plugin's setting), "env"
+    (RELEBO_TOKEN), "file" (token.json), or None when there is none. A token set outside
+    this device's files is not this device's to throw away."""
+    if os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN"):
+        return "option"
+    if os.environ.get("RELEBO_TOKEN"):
+        return "env"
+    if read_json(TOKEN_FILE).get("access_token"):
+        return "file"
+    return None
 
 
 def engine_url() -> str:
     return (
         os.environ.get("CLAUDE_PLUGIN_OPTION_ENGINE_URL")
         or os.environ.get("RELEBO_ENGINE_URL")
-        or _machine().get("engine_url")
+        or read_json(TOKEN_FILE).get("engine_url")
+        or read_json(PENDING_FILE).get("engine_url")
         or DEFAULT_ENGINE
     ).rstrip("/")
 
 
 def headers() -> dict:
-    """The person this machine acts as: a session token when one is set, else the machine's
-    own key, which the engine resolves to its owner. Nothing of the database travels here."""
     found = {"Content-Type": "application/json"}
-    token = os.environ.get("CLAUDE_PLUGIN_OPTION_TOKEN") or os.environ.get("RELEBO_TOKEN")
-    if token:
-        found["Authorization"] = "Bearer " + token
-        return found
-    key = os.environ.get("RELEBO_MACHINE_KEY") or _machine().get("fingerprint", "")
-    if key:
-        found["X-Machine-Key"] = key
+    bearer = token()
+    if bearer:
+        found["Authorization"] = "Bearer " + bearer
     return found
 
 
 def identified() -> bool:
-    sent = headers()
-    return "Authorization" in sent or "X-Machine-Key" in sent
+    return bool(token())
 
 
-def _call(request: urllib.request.Request, timeout: float, path: str) -> dict | None:
+class Reply:
+    """What the engine answered: the status, the body when it was JSON, and the code a
+    refusal carried. Status 0 means the engine was not reached at all."""
+
+    def __init__(self, status: int, body) -> None:
+        self.status = status
+        self.body = body if isinstance(body, dict) else None
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300 and self.body is not None
+
+    @property
+    def detail(self) -> dict:
+        """A refusal's detail: {"code", "message", ...} however FastAPI wrapped it."""
+        if not self.body:
+            return {}
+        detail = self.body.get("detail")
+        if isinstance(detail, dict):
+            return detail
+        if isinstance(detail, str):
+            return {"code": "", "message": detail}
+        return self.body
+
+    @property
+    def error_code(self) -> str:
+        """An OAuth error ("authorization_pending") or a refused token's cause ("token_revoked")."""
+        return str(self.body.get("error") or self.detail.get("code") or "") if self.body else ""
+
+
+def _call(request: urllib.request.Request, timeout: float, path: str) -> Reply:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return Reply(response.status, _parse(response.read()))
+    except urllib.error.HTTPError as error:
+        body = _parse(error.read())
+        log("call " + path + " answered " + str(error.code) + ": " + json.dumps(body)[:300])
+        return Reply(error.code, body)
     except (urllib.error.URLError, ValueError, OSError) as error:
         log("call " + path + " failed: " + str(error)[:300])
-        return None
+        return Reply(0, None)
 
 
-def post(path: str, body: dict, timeout: float = TIMEOUT_S) -> dict | None:
-    """POST to the engine; None on any failure. Hooks never raise."""
+def _parse(raw: bytes):
+    try:
+        return json.loads(raw.decode("utf-8")) if raw else {}
+    except ValueError:
+        return {}
+
+
+def post_reply(path: str, body: dict, timeout: float = TIMEOUT_S) -> Reply:
     data = json.dumps(body, ensure_ascii=False, default=str).encode("utf-8")
     request = urllib.request.Request(
         engine_url() + path, data=data, headers=headers(), method="POST"
@@ -75,9 +168,20 @@ def post(path: str, body: dict, timeout: float = TIMEOUT_S) -> dict | None:
     return _call(request, timeout, path)
 
 
-def get(path: str, timeout: float = TIMEOUT_S) -> dict | None:
+def get_reply(path: str, timeout: float = TIMEOUT_S) -> Reply:
     request = urllib.request.Request(engine_url() + path, headers=headers(), method="GET")
     return _call(request, timeout, path)
+
+
+def post(path: str, body: dict, timeout: float = TIMEOUT_S) -> dict | None:
+    """POST to the engine; None on any failure. Hooks never raise."""
+    reply = post_reply(path, body, timeout)
+    return reply.body if reply.ok else None
+
+
+def get(path: str, timeout: float = TIMEOUT_S) -> dict | None:
+    reply = get_reply(path, timeout)
+    return reply.body if reply.ok else None
 
 
 def log(line: str) -> None:
@@ -90,10 +194,12 @@ def log(line: str) -> None:
 
 
 def read_payload() -> dict:
+    """What Claude Code handed the hook; a stdin that is not JSON, or not there, is empty."""
     try:
-        return json.load(sys.stdin)
-    except ValueError:
+        found = json.load(sys.stdin)
+    except (ValueError, OSError):
         return {}
+    return found if isinstance(found, dict) else {}
 
 
 def context(event: str, text: str) -> None:

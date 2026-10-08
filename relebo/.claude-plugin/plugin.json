@@ -1,7 +1,7 @@
 {
   "name": "relebo",
   "displayName": "Relebo",
-  "version": "0.15.0",
+  "version": "0.18.0",
   "description": "Relebo's memory from Claude Code: what your places remember, kept and recalled through the Relebo engine.",
   "author": {
     "name": "Samprand"
@@ -10,12 +10,12 @@
     "engine_url": {
       "type": "string",
       "title": "Engine URL",
-      "description": "Your Relebo engine address. Leave empty on a registered device: ~/.relebo/machine.json carries it."
+      "description": "Your Relebo engine. Empty means the hosted one."
     },
     "token": {
       "type": "string",
-      "title": "Session token",
-      "description": "Only on a device without a registered Relebo machine.",
+      "title": "Relebo token",
+      "description": "Optional: a Relebo token (rlb_…) to use instead of logging in from the session.",
       "sensitive": true
     }
   }
