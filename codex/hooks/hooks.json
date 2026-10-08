@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/session_start.py\"",
+            "timeout": 60,
+            "statusMessage": "Relebo: recalling this place\u2026"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/user_prompt.py\"",
+            "timeout": 60,
+            "statusMessage": "Relebo: recalling\u2026"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/pre_tool.py\"",
+            "timeout": 60,
+            "statusMessage": "Relebo: judging the action\u2026"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/post_tool.py\"",
+            "timeout": 60,
+            "statusMessage": "Relebo: noting the result\u2026"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/stop.py\"",
+            "timeout": 90,
+            "statusMessage": "Relebo: closing the turn\u2026"
+          }
+        ]
+      }
+    ]
+  }
+}

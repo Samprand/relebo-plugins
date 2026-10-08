@@ -271,6 +271,15 @@ class LoginTest(unittest.TestCase):
 
         self.assertEqual(self.login.watch(max_s=10, sleeper=sleeper), "")
 
+    def test_a_first_session_opens_the_browser_once_and_a_later_one_only_repeats(self) -> None:
+        opened = []
+        first = self.login.begin_at_session_start("s1", opener=lambda url: opened.append(url) or True, watcher=lambda: True)
+        self.assertIn("browser opened to approve code WDJB-MJH1", first)
+        again = self.login.begin_at_session_start("s1", opener=lambda url: opened.append(url) or True, watcher=lambda: True)
+        self.assertIn("approve code WDJB-MJH1", again)
+        self.assertEqual(opened, ["https://relebo.test/device?code=WDJB-MJH1"])
+        self.assertEqual(_Engine.state["codes"], 1)
+
     def test_the_command_tells_status_from_connect_by_the_persons_words(self) -> None:
         self.assertIn("not connected", self.login.command("status"))
         self.assertIn("not connected", self.login.command("¿estoy conectado?"))

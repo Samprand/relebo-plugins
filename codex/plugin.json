@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "relebo",
+  "version": "0.19.0",
+  "description": "Relebo's memory from Codex: what your places remember, kept and recalled through the Relebo engine.",
+  "author": {
+    "name": "Samprand"
+  },
+  "extensions": {
+    "com.openai.hooks": "./hooks/hooks.json"
+  }
+}
