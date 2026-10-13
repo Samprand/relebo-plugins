@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _check
 import _client
 import _login
 import _places
@@ -34,8 +35,12 @@ def arrive(payload: dict) -> None:
     if not reply.ok:
         return
     answer = reply.body
-    _places.note(answer.get("standing_id"), str(_situation.root_of(cwd)))
-    _client.context("SessionStart", answer.get("context") or "")
+    # where that project is on this machine: only a folder that is a project says so; a
+    # folder of repositories is nobody's place
+    if _situation.in_project(cwd):
+        _places.note(answer.get("standing_id"), str(_situation.root_of(cwd)))
+    parts = [answer.get("context") or "", _check.send(session_id, cwd, answer)]
+    _client.context("SessionStart", "\n".join(part for part in parts if part))
 
 
 if __name__ == "__main__":

@@ -32,3 +32,14 @@ def note(foundation_id, root: str) -> None:
 
 def path_of(foundation_id) -> str:
     return _load().get(str(foundation_id), "")
+
+
+def about_for(cwd: str, foundation_id, in_project: bool) -> str:
+    """Where the base the check is due for lives on this machine: the session's own root
+    when it runs in a project, else where a session once stood under that base."""
+    import _situation
+
+    if foundation_id is None:
+        return ""
+    root = str(_situation.root_of(cwd)) if in_project else path_of(foundation_id)
+    return root or ""

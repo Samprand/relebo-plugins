@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _check
 import _client
 import _login
 import _places
@@ -37,14 +38,17 @@ def talk(payload: dict) -> None:
     if not reply.ok:
         return
     answer = reply.body
-    _places.note(answer.get("standing_id"), root)
+    # a session the words placed, from a folder that is no project, says nothing of where
+    # that project is on this machine
+    if _situation.in_project(cwd):
+        _places.note(answer.get("standing_id"), root)
     # a project named from here: where it is on this machine, if a session ever stood there
     local = []
     for named in answer.get("named") or []:
         path = _places.path_of(named.get("foundation_id"))
         if path:
             local.append(LOCAL_PLACE % (named.get("name"), path))
-    parts = [answer.get("context") or ""] + local
+    parts = [answer.get("context") or ""] + local + [_check.send(session_id, cwd, answer)]
     _client.context("UserPromptSubmit", "\n".join(part for part in parts if part))
 
 

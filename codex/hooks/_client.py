@@ -29,6 +29,8 @@ DEFAULT_ENGINE = "https://api.relebo.ai"
 # which of Relebo's own clients these hooks run as: Codex sets RELEBO_CLIENT=codex
 CLIENT_ID = os.environ.get("RELEBO_CLIENT") or "claude-code"
 TIMEOUT_S = 60.0
+# the memory reads a place's files with its model before answering: longer than a recall
+ABOUT_TIMEOUT_S = 45.0
 # a hook that gates an action waits less: the person is waiting on the other side
 GATE_TIMEOUT_S = 25.0
 # asking for a code or polling it must never make a session start slow

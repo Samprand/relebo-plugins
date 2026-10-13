@@ -8,7 +8,7 @@
             "type": "command",
             "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/session_start.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: recalling this place\u2026"
+            "statusMessage": "Relebo: recalling this place…"
           }
         ]
       }
@@ -20,7 +20,7 @@
             "type": "command",
             "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/user_prompt.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: recalling\u2026"
+            "statusMessage": "Relebo: recalling…"
           }
         ]
       }
@@ -33,20 +33,20 @@
             "type": "command",
             "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/pre_tool.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: judging the action\u2026"
+            "statusMessage": "Relebo: judging the action…"
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Grep|Glob",
         "hooks": [
           {
             "type": "command",
             "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/post_tool.py\"",
             "timeout": 60,
-            "statusMessage": "Relebo: noting the result\u2026"
+            "statusMessage": "Relebo: noting the result…"
           }
         ]
       }
@@ -58,7 +58,7 @@
             "type": "command",
             "command": "RELEBO_CLIENT=codex python3 \"${PLUGIN_ROOT}/hooks/stop.py\"",
             "timeout": 90,
-            "statusMessage": "Relebo: closing the turn\u2026"
+            "statusMessage": "Relebo: closing the turn…"
           }
         ]
       }

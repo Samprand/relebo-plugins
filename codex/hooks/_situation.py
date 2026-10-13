@@ -141,8 +141,25 @@ def relative(cwd: str, file_path: str):
         return None
 
 
+def place_of(cwd: str, file_path: str) -> tuple[Path, str]:
+    """The repository a file belongs to and its remote: the file's own git root when it has
+    one, the session's otherwise. From a folder that holds several repositories (MPR on
+    2026-10-12) each file is of its own, whatever folder the session started in."""
+    if file_path:
+        try:
+            where = str(Path(file_path).resolve().parent)
+        except OSError:
+            where = ""
+        top = _git(where, "rev-parse", "--show-toplevel") if where else ""
+        if top:
+            return Path(top), _git(top, "remote", "get-url", "origin")
+    root = root_of(cwd)
+    return root, remote_of(cwd)
+
+
 def action_of(payload: dict) -> dict:
-    """What a tool hook tells the memory about the action, as the engine's request wants it."""
+    """What a tool hook tells the memory about the action, as the engine's request wants it:
+    the file's path inside its own repository, and that repository's folder and remote."""
     cwd = payload.get("cwd", "")
     tool = payload.get("tool_name") or ""
     tool_input = payload.get("tool_input") or {}
@@ -153,9 +170,28 @@ def action_of(payload: dict) -> dict:
     }
     if tool == "Bash":
         action["command"] = str(tool_input.get("command") or "")
+        # a command that goes into a repository (cd it, git -C it, a path inside it) is of that
+        # repository: on 2026-10-12 "what branch is apm ui on" was answered with git from the
+        # folder of repositories, and apm-ui was never recognised
+        entered = repo_in_command(cwd, action["command"])
+        if entered is not None:
+            root, remote = entered
+            action["root"] = str(root)
+            action["folder"] = root.name
+            action["remote"] = remote
         return action
-    file_path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
-    action["path"] = relative(cwd, file_path)
+    file_path = str(
+        tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path") or ""
+    )
+    root, remote = place_of(cwd, file_path)
+    action["root"] = str(root)
+    try:
+        action["path"] = str(Path(file_path).resolve().relative_to(root.resolve())) if file_path else None
+    except ValueError:
+        action["path"] = None
+    if action["path"] is not None:
+        action["folder"] = root.name
+        action["remote"] = remote
     if tool in EDIT_TOOLS:
         action["written"] = written(tool_input)
     return action
@@ -184,3 +220,109 @@ def changed_lines(root: Path, path: str) -> list:
         for line in diff.splitlines()
         if line.startswith("+") and not line.startswith("+++") and line[1:].strip()
     ]
+
+
+# what says what a place is, read by the machine for the memory to check a base against: the
+# agent was not relied on to read it (on 2026-10-12 it did so one time in two)
+_ABOUT_FILES = ("README.md", "README", "readme.md", "README.rst", "CLAUDE.md", "AGENTS.md")
+_ABOUT_MANIFESTS = ("package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Package.swift", "pubspec.yaml")
+_ABOUT_HEAD_CHARS = 6000
+_ABOUT_MANIFEST_CHARS = 800
+_ABOUT_MAX_CHARS = 12000
+
+
+def about_of(root: Path) -> str:
+    """The head of the README (or CLAUDE.md, AGENTS.md), the head of the manifests and the
+    top-level folders of a place, as one text; empty when the place has none of them."""
+    parts: list[str] = []
+    try:
+        entries = sorted(p.name for p in root.iterdir() if not p.name.startswith("."))
+    except OSError:
+        return ""
+    for name in _ABOUT_FILES:
+        path = root / name
+        if path.is_file():
+            try:
+                head = path.read_text(encoding="utf-8", errors="replace")[:_ABOUT_HEAD_CHARS]
+            except OSError:
+                continue
+            parts.append(f"## {name}\n{head.strip()}")
+            if name.upper().startswith("README"):
+                break
+    for name in _ABOUT_MANIFESTS:
+        path = root / name
+        if path.is_file():
+            try:
+                head = path.read_text(encoding="utf-8", errors="replace")[:_ABOUT_MANIFEST_CHARS]
+            except OSError:
+                continue
+            parts.append(f"## {name}\n{head.strip()}")
+    folders = [n for n in entries if (root / n).is_dir()]
+    if folders:
+        parts.append("## top-level folders\n" + ", ".join(folders[:40]))
+    return "\n\n".join(parts)[:_ABOUT_MAX_CHARS]
+
+
+_SIGNAL_COMMITS = 50
+_SIGNAL_SIBLINGS = 20
+
+
+def signals_of(root: Path) -> str:
+    """The surroundings of a place, as evidence beside its files: the remote's host, the
+    e-mail domains of its recent commits, its parent folder and the repositories beside it.
+    No one of them decides; together they justify."""
+    lines: list[str] = []
+    remote = _git(str(root), "remote", "get-url", "origin")
+    if remote:
+        host = re.sub(r"^[a-z+]+://", "", remote).split("@")[-1].split("/")[0].split(":")[0]
+        lines.append(f"remote host: {host}")
+    log = _git(str(root), "log", f"-{_SIGNAL_COMMITS}", "--format=%ae")
+    if log:
+        domains: dict[str, int] = {}
+        for address in log.splitlines():
+            domain = address.strip().split("@")[-1].lower()
+            if domain:
+                domains[domain] = domains.get(domain, 0) + 1
+        top = sorted(domains.items(), key=lambda d: -d[1])[:3]
+        lines.append("commit e-mail domains: " + ", ".join(f"{d} ({n})" for d, n in top))
+    parent = root.resolve().parent
+    lines.append(f"parent folder: {parent.name}")
+    try:
+        siblings = sorted(
+            p.name
+            for p in parent.iterdir()
+            if p.is_dir() and p.name != root.name and not p.name.startswith(".") and (p / ".git").exists()
+        )[:_SIGNAL_SIBLINGS]
+    except OSError:
+        siblings = []
+    if siblings:
+        lines.append("repositories beside it: " + ", ".join(siblings))
+    return "\n".join(lines)
+
+
+_COMMAND_PATH = re.compile(r"(?:^|[\s;&|(])(?:cd\s+|-C\s+)?(\"[^\"]+\"|'[^']+'|[~./A-Za-z0-9_][^\s;&|)]*)")
+
+
+def repo_in_command(cwd: str, command: str):
+    """The repository a shell command goes into, other than the session's own: the first
+    word of it that is a folder or file inside a git repository whose root is not the
+    session's. None when it names none."""
+    own = _git(cwd, "rev-parse", "--show-toplevel")
+    base = Path(cwd or ".")
+    for raw in _COMMAND_PATH.findall(command or ""):
+        word = raw.strip("\"'")
+        if not word or word.startswith("-") or "=" in word or word.startswith(_PROGRAM_ROOTS):
+            continue
+        path = Path(word).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        try:
+            if not path.exists():
+                continue
+            where = str(path if path.is_dir() else path.parent)
+        except OSError:
+            continue
+        top = _git(where, "rev-parse", "--show-toplevel")
+        if top and top != own:
+            return Path(top), _git(top, "remote", "get-url", "origin")
+    return None
