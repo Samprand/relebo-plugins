@@ -35,9 +35,8 @@ def arrive(payload: dict) -> None:
     if not reply.ok:
         return
     answer = reply.body
-    # where that project is on this machine: only a folder that is a project says so; a
-    # folder of repositories is nobody's place
-    if _situation.in_project(cwd):
+    # where that project is on this machine: only when the base is the session's own folder
+    if answer.get("standing_id") is not None and answer.get("standing_id") == answer.get("home_id"):
         _places.note(answer.get("standing_id"), str(_situation.root_of(cwd)))
     parts = [answer.get("context") or "", _check.send(session_id, cwd, answer)]
     _client.context("SessionStart", "\n".join(part for part in parts if part))

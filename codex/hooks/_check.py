@@ -22,7 +22,7 @@ def send(session_id: str, cwd: str, answer: dict, root: str = "") -> str:
         # the place to recognise: the file's own repository, or the session's folder
         where = root or (str(_situation.root_of(cwd)) if _situation.in_project(cwd) else "")
     else:
-        where = _places.about_for(cwd, check_id, _situation.in_project(cwd))
+        where = _places.about_for(cwd, check_id, answer.get("home_id"))
     if not where or not Path(where).is_dir():
         return ""
     place = Path(where)

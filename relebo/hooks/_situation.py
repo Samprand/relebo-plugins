@@ -231,6 +231,14 @@ _ABOUT_MANIFEST_CHARS = 800
 _ABOUT_MAX_CHARS = 12000
 
 
+def _scrubbed(text: str) -> str:
+    """The text without the lines that look like a secret or a credential: a README or a
+    CLAUDE.md sometimes carries a token or a connection string."""
+    return "\n".join(
+        line for line in text.splitlines() if not (_SECRETS.search(line) and ("=" in line or ":" in line))
+    )
+
+
 def about_of(root: Path) -> str:
     """The head of the README (or CLAUDE.md, AGENTS.md), the head of the manifests and the
     top-level folders of a place, as one text; empty when the place has none of them."""
@@ -246,7 +254,7 @@ def about_of(root: Path) -> str:
                 head = path.read_text(encoding="utf-8", errors="replace")[:_ABOUT_HEAD_CHARS]
             except OSError:
                 continue
-            parts.append(f"## {name}\n{head.strip()}")
+            parts.append(f"## {name}\n{_scrubbed(head).strip()}")
             if name.upper().startswith("README"):
                 break
     for name in _ABOUT_MANIFESTS:
@@ -256,7 +264,7 @@ def about_of(root: Path) -> str:
                 head = path.read_text(encoding="utf-8", errors="replace")[:_ABOUT_MANIFEST_CHARS]
             except OSError:
                 continue
-            parts.append(f"## {name}\n{head.strip()}")
+            parts.append(f"## {name}\n{_scrubbed(head).strip()}")
     folders = [n for n in entries if (root / n).is_dir()]
     if folders:
         parts.append("## top-level folders\n" + ", ".join(folders[:40]))
@@ -296,10 +304,12 @@ def signals_of(root: Path) -> str:
     except OSError:
         siblings = []
     if siblings:
-        lines.append("repositories beside it: " + ", ".join(siblings))
+        # how many, never which: the projects beside it may be other clients' and stay here
+        lines.append(f"repositories beside it: {len(siblings)}")
     return "\n".join(lines)
 
 
+_COMMAND_PATHS_MAX = 12
 _COMMAND_PATH = re.compile(r"(?:^|[\s;&|(])(?:cd\s+|-C\s+)?(\"[^\"]+\"|'[^']+'|[~./A-Za-z0-9_][^\s;&|)]*)")
 
 
@@ -309,10 +319,17 @@ def repo_in_command(cwd: str, command: str):
     session's. None when it names none."""
     own = _git(cwd, "rev-parse", "--show-toplevel")
     base = Path(cwd or ".")
+    looked = 0
     for raw in _COMMAND_PATH.findall(command or ""):
         word = raw.strip("\"'")
         if not word or word.startswith("-") or "=" in word or word.startswith(_PROGRAM_ROOTS):
             continue
+        # a word that could be a path: a slash, a dot, a tilde, or a folder of this place
+        if not ("/" in word or word.startswith((".", "~")) or (base / word).is_dir()):
+            continue
+        looked += 1
+        if looked > _COMMAND_PATHS_MAX:
+            break
         path = Path(word).expanduser()
         if not path.is_absolute():
             path = base / path

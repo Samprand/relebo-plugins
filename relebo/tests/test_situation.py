@@ -120,7 +120,8 @@ class SignalsOfTest(unittest.TestCase):
             self.assertIn("remote host: gitlab.mpr.org", text)
             self.assertIn("commit e-mail domains: mpr.org (1)", text)
             self.assertIn("parent folder: MPR", text)
-            self.assertIn("repositories beside it: yourclassical-react", text)
+            self.assertIn("repositories beside it: 1", text)
+            self.assertNotIn("yourclassical-react", text)
 
 
 class CommandRepoTest(unittest.TestCase):
@@ -160,3 +161,15 @@ class SearchToolTest(unittest.TestCase):
                 {"session_id": "s", "cwd": str(mpr), "tool_name": "Grep", "tool_input": {"pattern": "Button", "path": str(apm / "src")}}
             )
             self.assertEqual(action.get("folder"), "apm-ui")
+
+
+class ScrubTest(unittest.TestCase):
+    def test_lines_that_look_like_secrets_never_leave(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("# tools\n\nInternal scripts.\n\nAPI_KEY=sk-live-abc123\ntoken: xyz\nRun with make.\n")
+            text = _situation.about_of(root)
+            self.assertIn("Internal scripts", text)
+            self.assertIn("Run with make", text)
+            self.assertNotIn("sk-live", text)
+            self.assertNotIn("xyz", text)

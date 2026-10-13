@@ -40,7 +40,7 @@ def talk(payload: dict) -> None:
     answer = reply.body
     # a session the words placed, from a folder that is no project, says nothing of where
     # that project is on this machine
-    if _situation.in_project(cwd):
+    if answer.get("standing_id") is not None and answer.get("standing_id") == answer.get("home_id"):
         _places.note(answer.get("standing_id"), root)
     # a project named from here: where it is on this machine, if a session ever stood there
     local = []
