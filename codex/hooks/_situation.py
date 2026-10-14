@@ -428,3 +428,36 @@ def repo_in_command(cwd: str, command: str):
         if top and top != own:
             return Path(top), _git(top, "remote", "get-url", "origin")
     return None
+
+
+def locale_of() -> str:
+    """The machine's locale, as a hint of the person's language: weak (a machine set to
+    en_US by a person who writes Spanish), so the engine lets their words win."""
+    for name in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(name, "")
+        if value and not value.startswith(("C", "POSIX")):
+            return value[:40]
+    try:
+        import locale as _locale
+
+        return (_locale.getlocale()[0] or "")[:40]
+    except (ValueError, TypeError):
+        return ""
+
+
+def time_zone_of() -> str:
+    """The machine's time zone by its IANA name (America/Bogota), from the system's link
+    when it has one; else the abbreviation the clock gives."""
+    for link in ("/etc/localtime",):
+        try:
+            target = os.readlink(link)
+        except OSError:
+            continue
+        if "zoneinfo/" in target:
+            return target.split("zoneinfo/", 1)[1][:80]
+    try:
+        import time as _time
+
+        return (_time.tzname[0] or "")[:80]
+    except (IndexError, AttributeError):
+        return ""

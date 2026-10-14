@@ -27,6 +27,8 @@ def arrive(payload: dict) -> None:
             "folder": _situation.folder_of(cwd),
             "remote": _situation.remote_of(cwd),
             "in_project": _situation.in_project(cwd),
+            "locale": _situation.locale_of(),
+            "time_zone": _situation.time_zone_of(),
         },
     )
     if _login.refused(reply):
