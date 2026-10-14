@@ -106,61 +106,31 @@ class AboutOfTest(unittest.TestCase):
 
 
 class SignalsOfTest(unittest.TestCase):
-    def test_the_surroundings_of_a_repository_are_read_as_evidence(self) -> None:
+    def test_the_surroundings_of_a_repository_are_read_as_public_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mpr = Path(tmp) / "MPR"
             mpr.mkdir()
             apm = _repo(mpr, "apm-ui", "git@gitlab.mpr.org:sites/libraries/apm-ui.git")
             _repo(mpr, "yourclassical-react", "https://gitlab.mpr.org/sites/yourclassical-react.git")
-            subprocess.run(
-                ["git", "-C", str(apm), "-c", "user.name=j", "-c", "user.email=j@mpr.org", "commit", "-q", "--allow-empty", "-m", "x"],
-                check=True,
-            )
+            (apm / "LICENSE").write_text("MIT License\n\nCopyright (c) 2024 Minnesota Public Radio\n")
+            (apm / "package.json").write_text('{"name": "@apmg-internal/ui", "homepage": "https://www.mpr.org", "keywords": ["react", "ui"]}')
+            subprocess.run(["git", "-C", str(apm), "-c", "user.name=j", "-c", "user.email=j@mpr.org", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+            subprocess.run(["git", "-C", str(apm), "branch", "feature/jr/web-851-app-router"], check=True)
+            subprocess.run(["git", "-C", str(apm), "branch", "WEB-900-cards"], check=True)
             text = _situation.signals_of(apm)
             self.assertIn("remote host: gitlab.mpr.org", text)
-            self.assertIn("commit e-mail domains: mpr.org (1)", text)
+            self.assertIn("remote owner and groups: sites/libraries", text)
+            self.assertIn("LICENSE copyright: Minnesota Public Radio", text)
+            self.assertIn("package.json name: @apmg-internal/ui", text)
+            self.assertIn("package.json homepage: https://www.mpr.org", text)
+            self.assertIn("ticket prefixes in branch names: WEB", text)
             self.assertIn("parent folder: MPR", text)
             self.assertIn("repositories beside it: 1", text)
+            # what never leaves: e-mail domains, sibling names, internal instruction files
+            self.assertNotIn("mpr.org (", text)
             self.assertNotIn("yourclassical-react", text)
-
-
-class CommandRepoTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.mpr = Path(self.tmp.name) / "MPR"
-        self.mpr.mkdir()
-        self.apm = _repo(self.mpr, "apm-ui", "https://gitlab.mpr.org/sites/libraries/apm-ui.git")
-
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
-
-    def _bash(self, command: str) -> dict:
-        return _situation.action_of(
-            {"session_id": "s", "cwd": str(self.mpr), "tool_name": "Bash", "tool_input": {"command": command}}
-        )
-
-    def test_a_command_going_into_a_repository_is_of_that_repository(self) -> None:
-        for command in ("git -C apm-ui branch --show-current", "cd apm-ui && git status", f"ls {self.apm}/src", "cat apm-ui/src/player.tsx"):
-            action = self._bash(command)
-            self.assertEqual(action.get("folder"), "apm-ui", command)
-            self.assertEqual(action.get("remote"), "https://gitlab.mpr.org/sites/libraries/apm-ui.git", command)
-
-    def test_a_command_naming_no_repository_stays_with_the_session(self) -> None:
-        action = self._bash("ls -la && echo hola")
-        self.assertNotIn("folder", action)
-        self.assertEqual(Path(action["root"]).resolve(), self.mpr.resolve())
-
-
-class SearchToolTest(unittest.TestCase):
-    def test_a_search_inside_a_repository_is_of_that_repository(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            mpr = Path(tmp) / "MPR"
-            mpr.mkdir()
-            apm = _repo(mpr, "apm-ui", "https://gitlab.mpr.org/sites/libraries/apm-ui.git")
-            action = _situation.action_of(
-                {"session_id": "s", "cwd": str(mpr), "tool_name": "Grep", "tool_input": {"pattern": "Button", "path": str(apm / "src")}}
-            )
-            self.assertEqual(action.get("folder"), "apm-ui")
+            (apm / "CLAUDE.md").write_text("internal: never ship on fridays\n")
+            self.assertNotIn("never ship", _situation.about_of(apm))
 
 
 class ScrubTest(unittest.TestCase):

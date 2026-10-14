@@ -224,7 +224,10 @@ def changed_lines(root: Path, path: str) -> list:
 
 # what says what a place is, read by the machine for the memory to check a base against: the
 # agent was not relied on to read it (on 2026-10-12 it did so one time in two)
-_ABOUT_FILES = ("README.md", "README", "readme.md", "README.rst", "CLAUDE.md", "AGENTS.md")
+# what says what a place is, read by the machine for the memory: the README and the manifests.
+# Never CLAUDE.md or AGENTS.md, a client's internal instructions, and never the commits'
+# e-mail domains (Julián, 2026-10-14)
+_ABOUT_FILES = ("README.md", "README", "readme.md", "README.rst")
 _ABOUT_MANIFESTS = ("package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Package.swift", "pubspec.yaml")
 _ABOUT_HEAD_CHARS = 6000
 _ABOUT_MANIFEST_CHARS = 800
@@ -276,37 +279,119 @@ _SIGNAL_SIBLINGS = 20
 
 
 def signals_of(root: Path) -> str:
-    """The surroundings of a place, as evidence beside its files: the remote's host, the
-    e-mail domains of its recent commits, its parent folder and the repositories beside it.
-    No one of them decides; together they justify."""
+    """The surroundings of a place, as evidence beside its files, all of it public or
+    structural: the remote's host and path (the owner and the groups), the copyright holder
+    of its LICENSE, the fields of its manifests that name an organisation (the scope of a
+    package name, the homepage, the repository, the keywords, a bundle id), the ticket
+    prefixes in its branch names, its parent folder and how many repositories stand beside
+    it. No one of them decides; together they justify."""
     lines: list[str] = []
     remote = _git(str(root), "remote", "get-url", "origin")
     if remote:
-        host = re.sub(r"^[a-z+]+://", "", remote).split("@")[-1].split("/")[0].split(":")[0]
-        lines.append(f"remote host: {host}")
-    log = _git(str(root), "log", f"-{_SIGNAL_COMMITS}", "--format=%ae")
-    if log:
-        domains: dict[str, int] = {}
-        for address in log.splitlines():
-            domain = address.strip().split("@")[-1].lower()
-            if domain:
-                domains[domain] = domains.get(domain, 0) + 1
-        top = sorted(domains.items(), key=lambda d: -d[1])[:3]
-        lines.append("commit e-mail domains: " + ", ".join(f"{d} ({n})" for d, n in top))
+        bare = re.sub(r"^[a-z+]+://", "", remote).split("@")[-1].replace(":", "/", 1)
+        host, _, path = bare.partition("/")
+        lines.append(f"remote host: {host.split(':')[0]}")
+        groups = [g for g in path.split("/") if g][:-1]
+        if groups:
+            lines.append("remote owner and groups: " + "/".join(groups))
+    holder = _copyright_of(root)
+    if holder:
+        lines.append(f"LICENSE copyright: {holder}")
+    for line in _manifest_facts(root):
+        lines.append(line)
+    prefixes = _ticket_prefixes(root)
+    if prefixes:
+        lines.append("ticket prefixes in branch names: " + ", ".join(prefixes))
     parent = root.resolve().parent
     lines.append(f"parent folder: {parent.name}")
     try:
-        siblings = sorted(
+        siblings = [
             p.name
             for p in parent.iterdir()
             if p.is_dir() and p.name != root.name and not p.name.startswith(".") and (p / ".git").exists()
-        )[:_SIGNAL_SIBLINGS]
+        ]
     except OSError:
         siblings = []
     if siblings:
         # how many, never which: the projects beside it may be other clients' and stay here
         lines.append(f"repositories beside it: {len(siblings)}")
     return "\n".join(lines)
+
+
+_COPYRIGHT = re.compile(r"(?im)^.*copyright\s*(?:\(c\)|©)?\s*[0-9,\- ]*\s*(.+?)\s*$")
+_TICKET = re.compile(r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{1,9})-[0-9]+")
+_MANIFEST_KEYS = ("name", "description", "homepage", "repository", "keywords", "author", "organization")
+
+
+def _copyright_of(root: Path) -> str:
+    for name in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING", "NOTICE"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+        except OSError:
+            continue
+        found = _COPYRIGHT.search(head)
+        if found:
+            holder = found.group(1).strip().strip(".")
+            return holder[:120]
+    return ""
+
+
+def _manifest_facts(root: Path) -> list[str]:
+    """The fields of the manifests that name an organisation or a product, read as plain
+    text: the scope of a package name, the homepage, the repository, the keywords, a bundle
+    id. Values only, no secrets live in these fields."""
+    facts: list[str] = []
+    package = root / "package.json"
+    if package.is_file():
+        try:
+            import json as _json
+
+            data = _json.loads(package.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            data = {}
+        if isinstance(data, dict):
+            for key in _MANIFEST_KEYS:
+                value = data.get(key)
+                if isinstance(value, dict):
+                    value = value.get("url") or value.get("name")
+                if isinstance(value, list):
+                    value = ", ".join(str(v) for v in value[:8])
+                if value:
+                    facts.append(f"package.json {key}: {str(value)[:160]}")
+    pubspec = root / "pubspec.yaml"
+    if pubspec.is_file():
+        try:
+            text = pubspec.read_text(encoding="utf-8", errors="replace")[:4000]
+        except OSError:
+            text = ""
+        for key in ("name", "description", "homepage", "repository"):
+            found = re.search(rf"(?m)^{key}:\s*(.+)$", text)
+            if found:
+                facts.append(f"pubspec {key}: {found.group(1).strip()[:160]}")
+    for gradle in (root / "android" / "app" / "build.gradle", root / "android" / "app" / "build.gradle.kts"):
+        if gradle.is_file():
+            try:
+                found = re.search(r'applicationId\s*=?\s*["\']([^"\']+)["\']', gradle.read_text(encoding="utf-8", errors="replace")[:20000])
+            except OSError:
+                found = None
+            if found:
+                facts.append(f"android applicationId: {found.group(1)}")
+            break
+    return facts[:10]
+
+
+def _ticket_prefixes(root: Path) -> list[str]:
+    """The ticket prefixes the branch names carry (WEB-851 gives WEB): which tracker project
+    the work of this repository is filed under. Only the prefixes, never the titles."""
+    names = _git(str(root), "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+    counts: dict[str, int] = {}
+    for prefix in _TICKET.findall(names or ""):
+        counts[prefix] = counts.get(prefix, 0) + 1
+    return [p for p, _ in sorted(counts.items(), key=lambda c: -c[1])[:4]]
+
 
 
 _COMMAND_PATHS_MAX = 12
