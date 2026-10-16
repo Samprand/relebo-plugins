@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -102,16 +103,26 @@ _READ_PROGRAMS = {
 _READ_GIT = {"status", "log", "diff", "show", "branch", "rev-parse", "remote", "ls-files", "blame", "describe", "tag"}
 _WRITES = re.compile(r"(>|>>|\|\s*(tee|xargs)\b|\brm\b|\bmv\b|\bcp\b|\bsed\s+-i\b|\bchmod\b|\bchown\b|\bsudo\b)")
 _SECRETS = re.compile(r"(?i)(\.env\b|\.env\.|secret|credential|token|api[_-]?key|\.pem\b|id_rsa|\.npmrc|\.netrc|keychain|password)")
+# a word of a command that names a thing to read, not a word to look for: a path, a file
+# with its extension, a dotfile, or a variable of the environment
+_FILE_LIKE = re.compile(r"(/|^[.~$]|\.[A-Za-z0-9]{1,8}$)")
+_QUOTED = re.compile(r"\"(?:[^\"\\\\]|\\\\.)*\"|'[^']*'")
 
 
 def read_only(command: str) -> bool:
     """Whether a shell command only looks at the project: every program in it is one that
-    reads, nothing is redirected or piped into a writer, and nothing it names could leak."""
+    reads, nothing is redirected or piped into a writer, and nothing it names could leak.
+    What sits inside quotes is a word to look for, not a program, a pipe or a file: on
+    2026-10-15 `grep "a\\|b" file` was split at its bar and asked about, and a grep for the
+    word "token" was taken for a read of one."""
     text = command.strip()
-    if not text or _WRITES.search(text) or _SECRETS.search(text):
+    if not text or _WRITES.search(_bare(text)):
         return False
-    for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", text):
-        words = part.strip().split()
+    for part in _commands(text):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            words = part.split()
         while words and (words[0] in ("cd",) or "=" in words[0] and not words[0].startswith("-")):
             words = words[2:] if words[0] == "cd" else words[1:]
         if not words:
@@ -121,7 +132,40 @@ def read_only(command: str) -> bool:
             return False
         if program == "git" and (len(words) < 2 or words[1] not in _READ_GIT):
             return False
+        if any(_SECRETS.search(w) and _FILE_LIKE.search(w) for w in words[1:]):
+            return False
     return True
+
+
+def _bare(text: str) -> str:
+    """The command with what sits inside quotes blanked: the shell's own words remain."""
+    return _QUOTED.sub(lambda found: '"' + " " * (len(found.group(0)) - 2) + '"', text)
+
+
+def _commands(text: str) -> list:
+    """The simple commands of a line, split at &&, ||, ; and | that stand outside quotes."""
+    parts, start, quote, i = [], 0, "", 0
+    while i < len(text):
+        char = text[i]
+        if quote:
+            if char == "\\" and quote == '"':
+                i += 1
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "\\":
+            i += 1
+        elif text.startswith(("&&", "||"), i):
+            parts.append(text[start:i])
+            i += 1
+            start = i + 1
+        elif char in ";|":
+            parts.append(text[start:i])
+            start = i + 1
+        i += 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts if p.strip()]
 
 
 def scratch_command(command: str) -> bool:
@@ -167,6 +211,9 @@ def action_of(payload: dict) -> dict:
         "origin_id": str(payload.get("session_id") or ""),
         "tool": tool,
         "root": str(root_of(cwd)),
+        # what the command does and for what, as the agent told its harness: the first
+        # sentence the person reads when the action is theirs to decide
+        "description": str(tool_input.get("description") or "")[:600],
     }
     if tool == "Bash":
         action["command"] = str(tool_input.get("command") or "")
@@ -409,8 +456,12 @@ def repo_in_command(cwd: str, command: str):
         word = raw.strip("\"'")
         if not word or word.startswith("-") or "=" in word or word.startswith(_PROGRAM_ROOTS):
             continue
-        # a word that could be a path: a slash, a dot, a tilde, or a folder of this place
-        if not ("/" in word or word.startswith((".", "~")) or (base / word).is_dir()):
+        # a word that could be a path: a slash, a dot, a tilde, or a folder of this place;
+        # one longer than any file name (a commit message in the command) is none
+        try:
+            if not ("/" in word or word.startswith((".", "~")) or (base / word).is_dir()):
+                continue
+        except OSError:
             continue
         looked += 1
         if looked > _COMMAND_PATHS_MAX:

@@ -143,3 +143,46 @@ class ScrubTest(unittest.TestCase):
             self.assertIn("Run with make", text)
             self.assertNotIn("sk-live", text)
             self.assertNotIn("xyz", text)
+
+
+class ReadOnlyCommands(unittest.TestCase):
+    """When the engine does not answer, a command that only looks goes through. What sits
+    inside quotes is a word to look for, not a pipe, a program or a file to read."""
+
+    def test_a_chain_of_reads_with_a_bar_inside_quotes_only_looks(self) -> None:
+        command = (
+            'cd /tmp/x && sed -n 28,37p a.py; grep -n "def waiting_about" -A6 b.py; '
+            'grep -n -e "asked_ids\\|put_ids" c.py | head -3; '
+            'git log --all -i --grep="gate\\|judge" --format="%h %s"'
+        )
+        self.assertTrue(_situation.read_only(command))
+
+    def test_a_word_to_look_for_is_not_a_secret_read(self) -> None:
+        self.assertTrue(_situation.read_only('grep -rn "def token" src | head'))
+        self.assertTrue(_situation.read_only("grep -rn password_hash src/models"))
+
+    def test_a_file_of_secrets_is_never_read_unjudged(self) -> None:
+        for command in (
+            "cat token.json",
+            "cat ~/.relebo/token.json",
+            "cat .env",
+            'grep secret ".env"',
+            "echo $API_KEY",
+            "ls ~/.ssh/id_rsa",
+        ):
+            self.assertFalse(_situation.read_only(command), command)
+
+    def test_a_writer_or_a_redirection_outside_quotes_is_not_a_read(self) -> None:
+        self.assertFalse(_situation.read_only("sed -i 's/a/b/' x.py"))
+        self.assertFalse(_situation.read_only("cat a.txt > b.txt"))
+        self.assertFalse(_situation.read_only("ls | xargs rm"))
+        self.assertFalse(_situation.read_only("grep -rl x src | tee found"))
+        self.assertFalse(_situation.read_only("git push origin main"))
+
+    def test_an_arrow_inside_quotes_is_a_word(self) -> None:
+        self.assertTrue(_situation.read_only('grep -n "=>" src/a.ts; grep -c ">" README.md'))
+
+    def test_a_word_too_long_for_a_path_breaks_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            command = "git commit -q -F - <<'EOF'\n" + ("fix(engine): " + "word " * 400) + "\nEOF"
+            self.assertIsNone(_situation.repo_in_command(parent, command))

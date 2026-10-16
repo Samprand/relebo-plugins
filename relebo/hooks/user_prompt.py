@@ -11,6 +11,13 @@ import _situation
 
 HOOK = "user_prompt"
 LOCAL_PLACE = "On this machine, %s is at %s."
+# after a report of what the memory did: how the agent sends the detail of what looked wrong
+# to Relebo's maintainers, with this plugin's own script and this session for the trace
+REPORT_HEADER = "[Relebo memory · what it did with the person's last message]"
+FEEDBACK_HOW = (
+    "To send detail to Relebo's maintainers, run: python3 %s --session %s "
+    '"<what happened, why it looks wrong, the ids>"'
+)
 
 
 def talk(payload: dict) -> None:
@@ -49,6 +56,9 @@ def talk(payload: dict) -> None:
         if path:
             local.append(LOCAL_PLACE % (named.get("name"), path))
     parts = [answer.get("context") or ""] + local + [_check.send(session_id, cwd, answer)]
+    if REPORT_HEADER in (answer.get("context") or ""):
+        script = str(Path(__file__).resolve().parent / "feedback.py")
+        parts.append(FEEDBACK_HOW % (script, session_id))
     _client.context("UserPromptSubmit", "\n".join(part for part in parts if part))
 
 

@@ -100,8 +100,21 @@ def engine_url() -> str:
     ).rstrip("/")
 
 
+def version() -> str:
+    """The plugin's own version, from its manifest; "0" when the manifest is not there."""
+    manifest = Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
+    return str(read_json(manifest).get("version") or "0")
+
+
+def user_agent() -> str:
+    """Who is calling, as the engine's front sees it: the plugin, by name, version and the
+    client it runs as. Python's own default ("Python-urllib/3.9") is refused by Cloudflare
+    with a 403 before the engine sees the call (2026-10-15, twenty calls in a row)."""
+    return "Relebo/" + version() + " (" + CLIENT_ID + ")"
+
+
 def headers() -> dict:
-    found = {"Content-Type": "application/json"}
+    found = {"Content-Type": "application/json", "User-Agent": user_agent()}
     bearer = token()
     if bearer:
         found["Authorization"] = "Bearer " + bearer

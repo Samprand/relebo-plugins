@@ -12,12 +12,33 @@ OWN_MEMORY_REFUSED = (
     "Do not save memories yourself. What the person teaches is read when the turn ends and "
     "remembered by Relebo's memory. Just answer the person."
 )
-# the gate fails closed: an action the memory could not judge goes to the person
-UNREACHED = (
-    "Relebo's memory could not judge this action (the engine did not answer). "
-    "Ask the person before doing it."
-)
+# The gate fails closed: an action the memory could not judge goes to the person, in the
+# person's own format and language (what it does, why it is asked, the rules), never with
+# an error name (2026-10-16). A command that only looks goes through.
+UNREACHED = {
+    "es": "%s Pide tu confirmación porque la memoria no pudo revisarlo y no es solo una lectura. Reglas: ninguna.",
+    "en": "%s It asks for your confirmation because the memory could not review it and it is not only a read. Rules: none.",
+}
+DOES = {"es": "Ejecuta `%s`.", "en": "Runs `%s`."}
+COMMAND_SHOWN_CHARS = 90
 UNREACHED_READ = "engine did not answer; a command that only looks goes through: "
+
+
+def unreached_text(payload: dict) -> str:
+    """What the person reads when the engine did not answer: what the command does, as the
+    agent described it, else the command itself."""
+    tool_input = payload.get("tool_input") or {}
+    lang = "es" if (_situation.locale_of() or "").lower().startswith("es") else "en"
+    said = str(tool_input.get("description") or "").strip()
+    if said:
+        does = said if said.endswith((".", "!", "?")) else said + "."
+    else:
+        shown = str(tool_input.get("command") or tool_input.get("file_path") or "").strip()
+        shown = shown.replace("\n", " ")
+        if len(shown) > COMMAND_SHOWN_CHARS:
+            shown = shown[:COMMAND_SHOWN_CHARS].rstrip() + "…"
+        does = DOES[lang] % shown
+    return UNREACHED[lang] % does
 
 
 def own_memory(payload: dict) -> bool:
@@ -53,7 +74,7 @@ def judge(payload: dict) -> None:
         if payload.get("tool_name") == "Bash" and _situation.read_only(command):
             _client.log(HOOK + " " + UNREACHED_READ + command[:120])
             return
-        _client.permission("ask", UNREACHED)
+        _client.permission("ask", unreached_text(payload))
         return
     decision = answer.get("decision")
     if decision == "hold":
@@ -65,10 +86,12 @@ def judge(payload: dict) -> None:
 
 
 if __name__ == "__main__":
+    payload = {}
     try:
-        judge(_client.read_payload())
+        payload = _client.read_payload()
+        judge(payload)
     except SystemExit:
         raise
     except BaseException as error:  # noqa: BLE001 - the gate never allows on a failure of its own
         _client.log(HOOK + " " + type(error).__name__ + ": " + str(error)[:300])
-        _client.permission("ask", UNREACHED)
+        _client.permission("ask", unreached_text(payload))
