@@ -15,30 +15,14 @@ OWN_MEMORY_REFUSED = (
 # The gate fails closed: an action the memory could not judge goes to the person, in the
 # person's own format and language (what it does, why it is asked, the rules), never with
 # an error name (2026-10-16). A command that only looks goes through.
-UNREACHED = {
-    "es": "%s Pide tu confirmación porque la memoria no pudo revisarlo y no es solo una lectura. Reglas: ninguna.",
-    "en": "%s It asks for your confirmation because the memory could not review it and it is not only a read. Rules: none.",
-}
-DOES = {"es": "Ejecuta `%s`.", "en": "Runs `%s`."}
-COMMAND_SHOWN_CHARS = 90
-UNREACHED_READ = "engine did not answer; a command that only looks goes through: "
-
-
-def unreached_text(payload: dict) -> str:
-    """What the person reads when the engine did not answer: what the command does, as the
-    agent described it, else the command itself."""
-    tool_input = payload.get("tool_input") or {}
-    lang = "es" if (_situation.locale_of() or "").lower().startswith("es") else "en"
-    said = str(tool_input.get("description") or "").strip()
-    if said:
-        does = said if said.endswith((".", "!", "?")) else said + "."
-    else:
-        shown = str(tool_input.get("command") or tool_input.get("file_path") or "").strip()
-        shown = shown.replace("\n", " ")
-        if len(shown) > COMMAND_SHOWN_CHARS:
-            shown = shown[:COMMAND_SHOWN_CHARS].rstrip() + "…"
-        does = DOES[lang] % shown
-    return UNREACHED[lang] % does
+# Nothing stops without a rule behind it (the person's decision, 2026-10-16): an action the
+# memory could not review goes through, and the agent is told the rules were not checked
+UNREACHED_NOTE = (
+    "Relebo's memory could not review this action in time: the rules of this place were "
+    "not checked against it. Keep to what you were given on arrival, and if the action "
+    "is one of weight (it publishes, deploys or deletes), say so to the person in a line."
+)
+UNREACHED = "engine did not answer; the action goes through with a note to the agent: "
 
 
 def own_memory(payload: dict) -> bool:
@@ -68,13 +52,12 @@ def judge(payload: dict) -> None:
         return
     answer = reply.body if reply.ok else None
     if not answer:
-        # the gate fails closed, except for a command that only looks: nothing of the place
-        # is at stake in it, and the person is not asked about every ls
-        command = str(tool_input.get("command") or "")
-        if payload.get("tool_name") == "Bash" and _situation.read_only(command):
-            _client.log(HOOK + " " + UNREACHED_READ + command[:120])
-            return
-        _client.permission("ask", unreached_text(payload))
+        # nothing stops without a rule behind it: the action goes through, and the agent is
+        # told the rules were not checked, unless the command only looks
+        command = str(tool_input.get("command") or tool_input.get("file_path") or "")
+        _client.log(HOOK + " " + UNREACHED + command[:120])
+        if not (payload.get("tool_name") == "Bash" and _situation.read_only(command)):
+            _client.context("PreToolUse", UNREACHED_NOTE)
         return
     decision = answer.get("decision")
     if decision == "hold":
@@ -92,6 +75,6 @@ if __name__ == "__main__":
         judge(payload)
     except SystemExit:
         raise
-    except BaseException as error:  # noqa: BLE001 - the gate never allows on a failure of its own
+    except BaseException as error:  # noqa: BLE001 - nothing stops without a rule: the agent is told
         _client.log(HOOK + " " + type(error).__name__ + ": " + str(error)[:300])
-        _client.permission("ask", unreached_text(payload))
+        _client.context("PreToolUse", UNREACHED_NOTE)

@@ -71,6 +71,19 @@ class ActionOfTest(unittest.TestCase):
         self.assertIsNone(action["path"])
         self.assertNotIn("folder", action)
 
+    def test_a_command_longer_than_the_engine_takes_goes_as_its_head_and_its_tail(self) -> None:
+        """2026-10-16: a 20 KB script fed to a shell was refused by the engine (422, too long)
+        and the person was asked to confirm it with no rule behind it."""
+        self.assertEqual(_situation.trimmed("echo hi"), "echo hi")
+        long = "python3 - <<'EOF'\n" + "x = 1\n" * 12000 + "EOF\nrm -rf build"
+        action = _situation.action_of(
+            {"session_id": "s", "cwd": str(self.mpr), "tool_name": "Bash", "tool_input": {"command": long}}
+        )
+        cut = action["command"]
+        self.assertLessEqual(len(cut), _situation.MAX_COMMAND_CHARS)
+        self.assertTrue(cut.startswith("python3 - <<'EOF'") and cut.endswith("EOF\nrm -rf build"))
+        self.assertIn("[…]", cut)
+
     def test_a_shell_command_is_of_the_session_folder(self) -> None:
         action = _situation.action_of(
             {"session_id": "s", "cwd": str(self.react), "tool_name": "Bash", "tool_input": {"command": "ls"}}

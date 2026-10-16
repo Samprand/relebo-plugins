@@ -32,7 +32,7 @@ TIMEOUT_S = 60.0
 # the memory reads a place's files with its model before answering: longer than a recall
 ABOUT_TIMEOUT_S = 45.0
 # a hook that gates an action waits less: the person is waiting on the other side
-GATE_TIMEOUT_S = 25.0
+GATE_TIMEOUT_S = 40.0
 # asking for a code or polling it must never make a session start slow
 LOGIN_TIMEOUT_S = 10.0
 

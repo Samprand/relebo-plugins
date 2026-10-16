@@ -201,6 +201,20 @@ def place_of(cwd: str, file_path: str) -> tuple[Path, str]:
     return root, remote_of(cwd)
 
 
+# the engine takes a command of this many characters at most: a longer one (a script fed
+# to a shell) goes as its head and its tail, which is what the memory reads of it anyway
+MAX_COMMAND_CHARS = 60_000
+COMMAND_HEAD_CHARS = 45_000
+COMMAND_TAIL_CHARS = 12_000
+COMMAND_CUT = "\n[…]\n"
+
+
+def trimmed(command: str) -> str:
+    if len(command) <= MAX_COMMAND_CHARS:
+        return command
+    return command[:COMMAND_HEAD_CHARS] + COMMAND_CUT + command[-COMMAND_TAIL_CHARS:]
+
+
 def action_of(payload: dict) -> dict:
     """What a tool hook tells the memory about the action, as the engine's request wants it:
     the file's path inside its own repository, and that repository's folder and remote."""
@@ -216,7 +230,7 @@ def action_of(payload: dict) -> dict:
         "description": str(tool_input.get("description") or "")[:600],
     }
     if tool == "Bash":
-        action["command"] = str(tool_input.get("command") or "")
+        action["command"] = trimmed(str(tool_input.get("command") or ""))
         # a command that goes into a repository (cd it, git -C it, a path inside it) is of that
         # repository: on 2026-10-12 "what branch is apm ui on" was answered with git from the
         # folder of repositories, and apm-ui was never recognised
