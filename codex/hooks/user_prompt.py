@@ -8,6 +8,7 @@ import _client
 import _login
 import _places
 import _situation
+import _unread
 
 HOOK = "user_prompt"
 LOCAL_PLACE = "On this machine, %s is at %s."
@@ -28,21 +29,24 @@ def talk(payload: dict) -> None:
         return
     cwd = payload.get("cwd", "")
     root = str(_situation.root_of(cwd))
+    place = {
+        "folder": _situation.folder_of(cwd),
+        "remote": _situation.remote_of(cwd),
+        "root": root,
+        "in_project": _situation.in_project(cwd),
+    }
+    # what the engine could not read when it came is read now, before this message, so
+    # the person's words are never lost to the memory (2026-10-16: "el 8 descártalo")
+    _unread.flush(session_id, place)
+    text = payload.get("prompt") or ""
     reply = _client.post_reply(
-        "/memory/sessions/prompt",
-        {
-            "origin_id": session_id,
-            "text": payload.get("prompt") or "",
-            "folder": _situation.folder_of(cwd),
-            "remote": _situation.remote_of(cwd),
-            "root": root,
-            "in_project": _situation.in_project(cwd),
-        },
+        "/memory/sessions/prompt", {"origin_id": session_id, "text": text, **place}
     )
     if _login.refused(reply):
         _client.context("UserPromptSubmit", _login.forget(reply, session_id))
         return
     if not reply.ok:
+        _unread.keep(session_id, text)
         return
     answer = reply.body
     # a session the words placed, from a folder that is no project, says nothing of where
