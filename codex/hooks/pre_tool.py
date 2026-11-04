@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _client
+import _held
 import _login
 import _situation
 
@@ -23,6 +24,8 @@ UNREACHED_NOTE = (
     "is one of weight (it publishes, deploys or deletes), say so to the person in a line."
 )
 UNREACHED = "engine did not answer; the action goes through with a note to the agent: "
+# a prohibition is not a held action: the agent is told it is denied, by whom and for whom
+DENIED = "Denied by a rule of this place, not held for review. "
 
 
 def own_memory(payload: dict) -> bool:
@@ -43,9 +46,11 @@ def judge(payload: dict) -> None:
         return
     if payload.get("tool_name") == "Bash" and _situation.scratch_command(str(tool_input.get("command") or "")):
         return
-    reply = _client.post_reply(
-        "/memory/sessions/action", _situation.action_of(payload), timeout=_client.GATE_TIMEOUT_S
-    )
+    action = _situation.action_of(payload)
+    session_id = str(payload.get("session_id") or "")
+    # the same action the gate just held, sent again unchanged: the memory learns from it
+    action["repeats_held"] = _held.repeats(session_id, action)
+    reply = _client.post_reply("/memory/sessions/action", action, timeout=_client.GATE_TIMEOUT_S)
     if _login.refused(reply):
         # the token is gone: the person is told why, once, and this action is theirs to allow
         _client.permission("ask", _login.forget(reply, str(payload.get("session_id") or "")))
@@ -61,10 +66,20 @@ def judge(payload: dict) -> None:
         return
     decision = answer.get("decision")
     if decision == "hold":
+        # held, not blocked: the agent reads the rule, the reason and the correction, and
+        # decides; sending the same action again is what the memory reads as overridden
+        _held.note(session_id, action)
         _client.permission("deny", answer.get("reason") or "")
+    elif decision == "deny":
+        # a prohibition: the only thing that denies. Repeating it changes nothing; whose yes
+        # was asked for travels in the reason
+        _held.forget(session_id)
+        _client.permission("deny", DENIED + (answer.get("reason") or ""))
     elif decision == "ask":
+        _held.forget(session_id)
         _client.permission("ask", answer.get("reason") or "", answer.get("context") or "")
     else:
+        _held.forget(session_id)
         _client.context("PreToolUse", answer.get("context") or "")
 
 

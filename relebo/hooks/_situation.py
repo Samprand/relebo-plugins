@@ -255,7 +255,31 @@ def action_of(payload: dict) -> dict:
         action["remote"] = remote
     if tool in EDIT_TOOLS:
         action["written"] = written(tool_input)
+        # what is already in the folder the file would land in, and whether the file exists:
+        # what lets the gate say "utils exists beside" before the file is written (Part 4)
+        if action["path"] is not None:
+            action["exists"], action["siblings"] = siblings_of(root, action["path"])
     return action
+
+
+# how many files of the destination folder the gate is shown: enough to see the folder's
+# shape, never a listing
+MAX_SIBLINGS = 60
+
+
+def siblings_of(root: Path, path: str) -> tuple:
+    """Whether the file exists, and the names of what already sits in its folder, sorted,
+    up to MAX_SIBLINGS; the folder's own subfolders end in a slash."""
+    target = root / path
+    try:
+        entries = sorted(
+            (name + "/" if (target.parent / name).is_dir() else name)
+            for name in os.listdir(target.parent)
+            if not name.startswith(".")
+        )
+    except OSError:
+        return target.exists(), []
+    return target.exists(), entries[:MAX_SIBLINGS]
 
 
 def written(tool_input: dict) -> list:

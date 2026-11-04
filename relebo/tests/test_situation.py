@@ -199,3 +199,56 @@ class ReadOnlyCommands(unittest.TestCase):
         with tempfile.TemporaryDirectory() as parent:
             command = "git commit -q -F - <<'EOF'\n" + ("fix(engine): " + "word " * 400) + "\nEOF"
             self.assertIsNone(_situation.repo_in_command(parent, command))
+
+
+class SiblingsTest(unittest.TestCase):
+    """Before a tool writes, the gate sees what already sits in the destination folder and
+    whether the file exists (Part 8, first change)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = _repo(Path(self.tmp.name), "xod", "https://github.com/julianramireze/xod.git")
+        (self.repo / "src" / "utils").mkdir()
+        (self.repo / "src" / "utils" / "dateUtils.ts").write_text("export {}\n")
+        (self.repo / "src" / "tools").mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, relative: str) -> dict:
+        return _situation.action_of(
+            {
+                "session_id": "s",
+                "cwd": str(self.repo),
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(self.repo / relative), "content": "export class Caller {}"},
+            }
+        )
+
+    def test_a_new_file_sees_its_siblings_and_is_marked_as_not_existing(self) -> None:
+        action = self._write("src/tools/caller.ts")
+        self.assertFalse(action["exists"])
+        self.assertEqual(action["siblings"], [])
+        beside = self._write("src/utils/caller.ts")
+        self.assertEqual(beside["siblings"], ["dateUtils.ts"])
+        self.assertFalse(beside["exists"])
+        parent = self._write("src/caller.ts")
+        self.assertEqual(parent["siblings"], ["player.tsx", "tools/", "utils/"])
+
+    def test_an_existing_file_is_marked_so(self) -> None:
+        action = self._write("src/utils/dateUtils.ts")
+        self.assertTrue(action["exists"])
+
+    def test_at_most_sixty_siblings_travel(self) -> None:
+        many = self.repo / "src" / "many"
+        many.mkdir()
+        for n in range(80):
+            (many / f"f{n:03}.ts").write_text("")
+        action = self._write("src/many/new.ts")
+        self.assertEqual(len(action["siblings"]), _situation.MAX_SIBLINGS)
+
+    def test_a_shell_command_carries_no_siblings(self) -> None:
+        action = _situation.action_of(
+            {"session_id": "s", "cwd": str(self.repo), "tool_name": "Bash", "tool_input": {"command": "ls"}}
+        )
+        self.assertNotIn("siblings", action)

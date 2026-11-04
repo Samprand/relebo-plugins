@@ -51,3 +51,25 @@ then `RELEBO_TOKEN`, then `~/.relebo/token.json`. Engine, first one found wins: 
 **Engine URL** (`CLAUDE_PLUGIN_OPTION_ENGINE_URL`), then `RELEBO_ENGINE_URL`, then the engine
 recorded in `token.json`, then the hosted engine. `RELEBO_CLIENT` names the client the hooks run
 as (`claude-code` by default; Codex sets `codex`).
+
+## The envelope
+
+What each hook sends the engine, and what comes back. The plugin reads what only this
+machine can read and judges nothing; the engine validates every envelope at the door and
+refuses one with a field missing, naming the field.
+
+| Hook | Route | Sends |
+| --- | --- | --- |
+| session start | `POST /memory/sessions/arrive` | `origin_id`, `source` (startup, resume, clear, compact), `folder`, `remote`, `in_project`, `locale`, `time_zone` |
+| prompt | `POST /memory/sessions/prompt` | `origin_id`, `text`, `folder`, `remote`, `root`, `in_project`, `resources`. A prompt the engine could not read is kept on the device and sent before the next call |
+| before a tool | `POST /memory/sessions/action` | `origin_id`, `tool`, `command` (cleaned) or `path` (relative to the root), `written` (the lines an edit would write), `description`, `root`, `folder`, `remote`, `siblings` (up to 60 names of the destination folder, a subfolder ending in `/`), `exists`, `repeats_held` |
+| after a tool | `POST /memory/sessions/result` | the same without `written`; when the engine asks (`check_id`), the README, manifests and folders of the place |
+| close | `POST /memory/sessions/end` | `origin_id`, `answer` (the agent's last message), `changed` (the lines changed per file), `root`, `folder`, `remote` |
+
+What comes back: `context` the hook injects; before a tool, a `decision`: `hold` (the rule,
+the reason and the correction go to the agent as a denied permission, and it decides: the
+same action sent again unchanged travels with `repeats_held`), `ask` (the person decides),
+`deny` (a prohibition and whose yes was asked for; repeating it changes nothing); at the close
+a `send_back` the agent follows. With the engine down, every hook lets the action through
+within its timeout and the agent sees one line saying the rules were not checked, except on
+commands that only look. Timeouts: 40 s on the gate, 60 s elsewhere, 90 s at the close.
