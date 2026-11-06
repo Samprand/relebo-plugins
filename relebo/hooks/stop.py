@@ -9,6 +9,7 @@ import _situation
 import _unread
 
 HOOK = "stop"
+EVENT = _client.STOP_EVENT
 
 
 def end(payload: dict) -> None:
@@ -40,7 +41,7 @@ def end(payload: dict) -> None:
         lines = _situation.changed_lines(root, path)
         if lines:
             changed[path] = lines
-    answer = _client.post(
+    reply = _client.post_reply(
         "/memory/sessions/end",
         {
             "origin_id": origin_id,
@@ -51,10 +52,17 @@ def end(payload: dict) -> None:
             "remote": _situation.remote_of(cwd),
         },
     )
-    if answer and answer.get("send_back"):
-        _client.send_back(answer["send_back"])
+    if _login.refused(reply):
+        _client.log(HOOK + " " + _login.forget(reply, origin_id))
+        return
+    if not reply.ok:
+        # the turn is over and the agent will not read a note: the person does
+        _client.unreached(EVENT, HOOK, "/memory/sessions/end " + str(reply.status))
+        return
+    if reply.body.get("send_back"):
+        _client.send_back(reply.body["send_back"])
 
 
 if __name__ == "__main__":
     payload = _client.read_payload()
-    _client.run(HOOK, lambda: end(payload))
+    _client.run(HOOK, lambda: end(payload), EVENT)

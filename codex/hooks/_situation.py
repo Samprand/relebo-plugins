@@ -231,8 +231,16 @@ def action_of(payload: dict) -> dict:
     }
     if tool == "Bash":
         action["command"] = trimmed(str(tool_input.get("command") or ""))
-        # a command that goes into a repository (cd it, git -C it, a path inside it) is of that
-        # repository: on 2026-10-12 "what branch is apm ui on" was answered with git from the
+        # a command is of the session's own repository, so the gate's mesa holds what hangs
+        # from `repo:` (a prohibition is linked where it was said and nowhere else since
+        # 2026-11-03; on 2026-11-06 a ban of this repository never reached the gate for a
+        # plain command, because the action named no repository and the engine took none)
+        own = _git(cwd, "rev-parse", "--show-toplevel")
+        if own:
+            action["folder"] = Path(own).name
+            action["remote"] = remote_of(own)
+        # a command that goes into another repository (cd it, git -C it, a path inside it) is
+        # of that one: on 2026-10-12 "what branch is apm ui on" was answered with git from the
         # folder of repositories, and apm-ui was never recognised
         entered = repo_in_command(cwd, action["command"])
         if entered is not None:

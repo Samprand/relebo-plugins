@@ -76,6 +76,8 @@ def judge(payload: dict) -> None:
         _held.forget(session_id)
         _client.permission("deny", DENIED + (answer.get("reason") or ""))
     elif decision == "ask":
+        # an exempt ban (Part 4): the exemption lifts the denial, not the confirmation. It is
+        # put to the person in their own terminal; repeating the action cannot answer for them
         _held.forget(session_id)
         _client.permission("ask", answer.get("reason") or "", answer.get("context") or "")
     else:

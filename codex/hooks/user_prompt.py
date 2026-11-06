@@ -11,6 +11,7 @@ import _situation
 import _unread
 
 HOOK = "user_prompt"
+EVENT = "UserPromptSubmit"
 LOCAL_PLACE = "On this machine, %s is at %s."
 # after a report of what the memory did: how the agent sends the detail of what looked wrong
 # to Relebo's maintainers, with this plugin's own script and this session for the trace
@@ -46,7 +47,9 @@ def talk(payload: dict) -> None:
         _client.context("UserPromptSubmit", _login.forget(reply, session_id))
         return
     if not reply.ok:
+        # kept to be read before the next call, and the agent is told nothing was recalled
         _unread.keep(session_id, text)
+        _client.unreached(EVENT, HOOK, "/memory/sessions/prompt " + str(reply.status))
         return
     answer = reply.body
     # a session the words placed, from a folder that is no project, says nothing of where
@@ -68,4 +71,4 @@ def talk(payload: dict) -> None:
 
 if __name__ == "__main__":
     payload = _client.read_payload()
-    _client.run(HOOK, lambda: talk(payload))
+    _client.run(HOOK, lambda: talk(payload), EVENT)

@@ -10,6 +10,7 @@ import _places
 import _situation
 
 HOOK = "session_start"
+EVENT = "SessionStart"
 
 
 def arrive(payload: dict) -> None:
@@ -35,6 +36,7 @@ def arrive(payload: dict) -> None:
         _client.context("SessionStart", _login.forget(reply, session_id))
         return
     if not reply.ok:
+        _client.unreached(EVENT, HOOK, "/memory/sessions/arrive " + str(reply.status))
         return
     answer = reply.body
     # where that project is on this machine: only when the base is the session's own folder
@@ -46,4 +48,4 @@ def arrive(payload: dict) -> None:
 
 if __name__ == "__main__":
     payload = _client.read_payload()
-    _client.run(HOOK, lambda: arrive(payload))
+    _client.run(HOOK, lambda: arrive(payload), EVENT)

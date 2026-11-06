@@ -10,6 +10,17 @@ import _places
 import _situation
 
 HOOK = "post_tool"
+EVENT = "PostToolUse"
+# tools that only look: with the engine down nothing of the place changed, so nothing is said
+LOOKING_TOOLS = frozenset({"Read", "Grep", "Glob"})
+
+
+def only_looks(payload: dict) -> bool:
+    tool = payload.get("tool_name") or ""
+    if tool in LOOKING_TOOLS:
+        return True
+    command = str((payload.get("tool_input") or {}).get("command") or "")
+    return tool == "Bash" and _situation.read_only(command)
 
 
 def read(payload: dict) -> None:
@@ -21,16 +32,21 @@ def read(payload: dict) -> None:
     if _login.refused(reply):
         _client.context("PostToolUse", _login.forget(reply, str(payload.get("session_id") or "")))
         return
-    if reply.ok:
-        # the file's repository is where the session now stands: that is where the project is
-        if action.get("path") is not None and action.get("remote"):
-            _places.note(reply.body.get("standing_id"), action["root"])
-        # a repository no base is marked by: its files are read here and sent, to recognise it
-        told = _check.send(str(payload.get("session_id") or ""), payload.get("cwd", ""), reply.body, action.get("root", ""))
-        parts = [reply.body.get("context") or "", told]
-        _client.context("PostToolUse", "\n".join(part for part in parts if part))
+    if not reply.ok:
+        if only_looks(payload):
+            _client.log(HOOK + " engine did not answer after an action that only looks")
+        else:
+            _client.unreached(EVENT, HOOK, "/memory/sessions/result " + str(reply.status))
+        return
+    # the file's repository is where the session now stands: that is where the project is
+    if action.get("path") is not None and action.get("remote"):
+        _places.note(reply.body.get("standing_id"), action["root"])
+    # a repository no base is marked by: its files are read here and sent, to recognise it
+    told = _check.send(str(payload.get("session_id") or ""), payload.get("cwd", ""), reply.body, action.get("root", ""))
+    parts = [reply.body.get("context") or "", told]
+    _client.context(EVENT, "\n".join(part for part in parts if part))
 
 
 if __name__ == "__main__":
     payload = _client.read_payload()
-    _client.run(HOOK, lambda: read(payload))
+    _client.run(HOOK, lambda: read(payload), EVENT)

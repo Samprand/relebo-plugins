@@ -90,6 +90,17 @@ class ActionOfTest(unittest.TestCase):
         )
         self.assertEqual(action["command"], "ls")
         self.assertEqual(Path(action["root"]).resolve(), self.react.resolve())
+        # the session's own repository travels with every command, so what hangs from its
+        # `repo:` context (a prohibition, since 2026-11-03) reaches the gate (2026-11-06)
+        self.assertEqual(action["folder"], "yourclassical-react")
+        self.assertEqual(action["remote"], "https://gitlab.mpr.org/sites/yourclassical-react.git")
+
+    def test_a_shell_command_outside_any_repository_names_none(self) -> None:
+        action = _situation.action_of(
+            {"session_id": "s", "cwd": str(self.mpr), "tool_name": "Bash", "tool_input": {"command": "ls"}}
+        )
+        self.assertNotIn("folder", action)
+        self.assertNotIn("remote", action)
 
 
 if __name__ == "__main__":

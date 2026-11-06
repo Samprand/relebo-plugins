@@ -36,6 +36,29 @@ GATE_TIMEOUT_S = 40.0
 # asking for a code or polling it must never make a session start slow
 LOGIN_TIMEOUT_S = 10.0
 
+# Part 8, criterion 5: with the engine down every hook lets the session go on and the agent
+# reads one line saying what the memory did not do, as the gate's own note does
+# (pre_tool.UNREACHED_NOTE). The turn's end has no agent left to read it: the person does
+UNREACHED_NOTES = {
+    "SessionStart": (
+        "Relebo's memory did not answer at the start of this session: nothing of this place "
+        "was recalled. Keep to what the person and the project say, and if an action is one "
+        "of weight (it publishes, deploys or deletes), say so to the person in a line."
+    ),
+    "UserPromptSubmit": (
+        "Relebo's memory could not read this message in time: it is kept on this machine and "
+        "read before the next one, and nothing was recalled for it. Keep to what you were "
+        "given, and if an action is one of weight (it publishes, deploys or deletes), say so "
+        "to the person in a line."
+    ),
+    "PostToolUse": (
+        "Relebo's memory did not answer after this action: what it did was not recorded, and "
+        "nothing was recalled for it."
+    ),
+    "Stop": "Relebo's memory did not answer at the end of this turn: what it taught was not read.",
+}
+STOP_EVENT = "Stop"
+
 
 def read_json(path: Path) -> dict:
     try:
@@ -217,11 +240,33 @@ def read_payload() -> dict:
     return found if isinstance(found, dict) else {}
 
 
+# whether this hook already printed its one answer: Claude Code reads one JSON object, so a
+# note after an answer would make both unreadable
+_said = [False]
+
+
+def _say(output: dict) -> None:
+    print(json.dumps(output))
+    _said[0] = True
+
+
 def context(event: str, text: str) -> None:
     if text:
-        print(
-            json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
-        )
+        _say({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
+
+
+def unreached(event: str, hook: str, why: str = "") -> None:
+    """The engine did not answer (down, a timeout, a refusal that is no login's): one line in
+    the log and one line for whoever reads this event, never an error. The hook still exits 0:
+    the plugin never stops the agent for the engine's fall."""
+    log(hook + " engine did not answer; the session goes on with a note" + (": " + why if why else ""))
+    if _said[0]:
+        return
+    note = UNREACHED_NOTES.get(event, "")
+    if event == STOP_EVENT:
+        _say({"systemMessage": note})
+    else:
+        context(event, note)
 
 
 def permission(decision: str, reason: str, text: str = "") -> None:
@@ -233,21 +278,24 @@ def permission(decision: str, reason: str, text: str = "") -> None:
     }
     if text:
         output["additionalContext"] = text
-    print(json.dumps({"hookSpecificOutput": output}))
+    _say({"hookSpecificOutput": output})
 
 
 def send_back(reason: str) -> None:
     """A Stop hook's way of keeping the turn open: the agent reads the reason and goes on."""
-    print(json.dumps({"decision": "block", "reason": reason}))
+    _say({"decision": "block", "reason": reason})
 
 
-def run(hook: str, body) -> None:
-    """A hook must never crash a session: whatever goes wrong is one line in the log and a
-    silent exit 0. The action gate is the exception and says so itself."""
+def run(hook: str, body, event: str = "") -> None:
+    """A hook must never crash a session: whatever goes wrong is one line in the log, the
+    event's note when the hook names its event and has said nothing yet, and exit 0. The
+    action gate is the exception and says so itself."""
     try:
         body()
     except SystemExit:
         raise
     except BaseException as error:  # noqa: BLE001 - the one place a hook swallows everything
         log(hook + " " + type(error).__name__ + ": " + str(error)[:300])
+        if event:
+            unreached(event, hook)
         sys.exit(0)
