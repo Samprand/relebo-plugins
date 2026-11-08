@@ -270,7 +270,8 @@ def unreached(event: str, hook: str, why: str = "") -> None:
 
 
 def permission(decision: str, reason: str, text: str = "") -> None:
-    """deny sends the action back to the agent with the reason; ask puts it to the person."""
+    """deny sends the action back to the agent with the reason; ask puts it to the person;
+    allow lets it through on the reason, past the runtime's own permission system."""
     output = {
         "hookEventName": "PreToolUse",
         "permissionDecision": decision,

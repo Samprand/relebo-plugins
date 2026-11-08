@@ -69,7 +69,9 @@ refuses one with a field missing, naming the field.
 What comes back: `context` the hook injects; before a tool, a `decision`: `hold` (the rule,
 the reason and the correction go to the agent as a denied permission, and it decides: the
 same action sent again unchanged travels with `repeats_held`), `ask` (the person decides),
-`deny` (a prohibition and whose yes was asked for; repeating it changes nothing); at the close
-a `send_back` the agent follows. With the engine down, every hook lets the action through
+`deny` (a prohibition and whose yes was asked for; repeating it changes nothing), `allow`
+(the memory read every rule of the place against the action and none stops it: it goes
+through on that judgement and Claude Code's own guess is not consulted; no decision means a
+rule was left unread or there was none, and the runtime judges as always); at the close a `send_back` the agent follows. With the engine down, every hook lets the action through
 within its timeout and the agent sees one line saying the rules were not checked, except on
 commands that only look. Timeouts: 40 s on the gate, 60 s elsewhere, 90 s at the close.

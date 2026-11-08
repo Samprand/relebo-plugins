@@ -65,6 +65,19 @@ class PreToolTest(unittest.TestCase):
         action = {"tool": "Bash", "command": "pnpm run deploy"}
         self.assertFalse(_held.repeats("s1", action))
 
+    def test_a_judged_allow_lets_the_action_through_and_a_silent_answer_decides_nothing(self) -> None:
+        """2026-11-08: an allow the memory judged goes past Claude Code's own permission system
+        with its ground; an answer with no decision injects context and decides nothing."""
+        reason = "La memoria juzgó la acción contra 4 reglas de este lugar y ninguna la frena"
+        output = self.judged({"decision": "allow", "reason": reason, "context": "rules"})
+        self.assertEqual(output["permissionDecision"], "allow")
+        self.assertEqual(output["permissionDecisionReason"], reason)
+        self.assertEqual(output["additionalContext"], "rules")
+        self.assertFalse(_held.repeats("s1", {"tool": "Bash", "command": "pnpm run deploy"}))
+        output = self.judged({"decision": None, "context": "rules"})
+        self.assertNotIn("permissionDecision", output)
+        self.assertEqual(output["additionalContext"], "rules")
+
     def test_a_hold_is_a_denial_to_the_agent_kept_for_the_repeat_and_a_ban_denies(self) -> None:
         output = self.judged({"decision": "hold", "reason": "- regla"})
         self.assertEqual(output["permissionDecision"], "deny")

@@ -17,7 +17,11 @@ OWN_MEMORY_REFUSED = (
 # person's own format and language (what it does, why it is asked, the rules), never with
 # an error name (2026-10-16). A command that only looks goes through.
 # Nothing stops without a rule behind it (the person's decision, 2026-10-16): an action the
-# memory could not review goes through, and the agent is told the rules were not checked
+# memory could not review goes through, and the agent is told the rules were not checked.
+# The memory governs (the person's decision, 2026-11-08): an allow the memory judged, with
+# every rule of the place read against the action, travels as the decision and Claude Code's
+# own guess is not consulted; an allow with a rule left unread or no rule at all is no
+# decision, and the runtime judges as before
 UNREACHED_NOTE = (
     "Relebo's memory could not review this action in time: the rules of this place were "
     "not checked against it. Keep to what you were given on arrival, and if the action "
@@ -80,6 +84,12 @@ def judge(payload: dict) -> None:
         # put to the person in their own terminal; repeating the action cannot answer for them
         _held.forget(session_id)
         _client.permission("ask", answer.get("reason") or "", answer.get("context") or "")
+    elif decision == "allow":
+        # the memory judged the action against every rule of the place and none stops it: it
+        # goes through on that judgement, and Claude Code's own guess is not consulted
+        # (2026-11-08). The ground travels in the reason, so the trace says why
+        _held.forget(session_id)
+        _client.permission("allow", answer.get("reason") or "", answer.get("context") or "")
     else:
         _held.forget(session_id)
         _client.context("PreToolUse", answer.get("context") or "")
