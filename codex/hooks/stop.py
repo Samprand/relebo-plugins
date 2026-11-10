@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _client
+import _held
 import _login
 import _situation
 import _unread
@@ -18,6 +19,8 @@ def end(payload: dict) -> None:
     origin_id = str(payload.get("session_id") or "")
     cwd = payload.get("cwd", "")
     root = _situation.root_of(cwd)
+    # a hold the turn did not answer does not outlive it
+    _held.forget(origin_id)
     # a prompt of this turn the engine could not read when it came is read before the turn
     # closes, so what the person said this turn is what the turn is read with
     _unread.flush(
@@ -51,6 +54,7 @@ def end(payload: dict) -> None:
             "folder": root.name,
             "remote": _situation.remote_of(cwd),
         },
+        timeout=_client.END_TIMEOUT_S,
     )
     if _login.refused(reply):
         _client.log(HOOK + " " + _login.forget(reply, origin_id))

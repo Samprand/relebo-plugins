@@ -78,6 +78,22 @@ class PreToolTest(unittest.TestCase):
         self.assertNotIn("permissionDecision", output)
         self.assertEqual(output["additionalContext"], "rules")
 
+    def test_a_hold_survives_the_allowed_actions_in_between_and_its_repeat_consumes_it(self) -> None:
+        """2026-11-10: the person's yes often comes after a look around. A held action stays
+        remembered through the actions the gate lets pass meanwhile, so the same command sent
+        again is still read as its repeat; once repeated, it is forgotten."""
+        held = {"tool": "Bash", "command": "pnpm run deploy"}
+        self.judged({"decision": "hold", "reason": "- regla"})
+        self.assertTrue(_held.repeats("s1", held))
+        self.payload["tool_input"]["command"] = "git status"
+        self.judged({"decision": "allow", "reason": "juzgada", "context": ""})
+        self.judged({"decision": None, "context": "rules"})
+        self.assertTrue(_held.repeats("s1", held))
+        self.payload["tool_input"]["command"] = "pnpm run deploy"
+        output = self.judged({"decision": "allow", "reason": "Retenida y repetida", "context": ""})
+        self.assertEqual(output["permissionDecision"], "allow")
+        self.assertFalse(_held.repeats("s1", held))
+
     def test_a_hold_is_a_denial_to_the_agent_kept_for_the_repeat_and_a_ban_denies(self) -> None:
         output = self.judged({"decision": "hold", "reason": "- regla"})
         self.assertEqual(output["permissionDecision"], "deny")

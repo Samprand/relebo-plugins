@@ -87,11 +87,15 @@ def judge(payload: dict) -> None:
     elif decision == "allow":
         # the memory judged the action against every rule of the place and none stops it: it
         # goes through on that judgement, and Claude Code's own guess is not consulted
-        # (2026-11-08). The ground travels in the reason, so the trace says why
-        _held.forget(session_id)
+        # (2026-11-08). The ground travels in the reason, so the trace says why. A held action
+        # stays remembered through the allowed ones in between, until its repeat or the end
+        # of the turn (2026-11-10): the person's yes often comes after a look around
+        if action["repeats_held"]:
+            _held.forget(session_id)
         _client.permission("allow", answer.get("reason") or "", answer.get("context") or "")
     else:
-        _held.forget(session_id)
+        if action["repeats_held"]:
+            _held.forget(session_id)
         _client.context("PreToolUse", answer.get("context") or "")
 
 

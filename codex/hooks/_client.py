@@ -28,11 +28,18 @@ PLACES_FILE = MEMORY_DIR / "places.json"
 DEFAULT_ENGINE = "https://api.relebo.ai"
 # which of Relebo's own clients these hooks run as: Codex sets RELEBO_CLIENT=codex
 CLIENT_ID = os.environ.get("RELEBO_CLIENT") or "claude-code"
-TIMEOUT_S = 60.0
+# how long a hook waits for the engine before the session goes on without it. A hook is
+# Claude Code's wait: on 2026-11-08 five actions at once each waited forty seconds on a
+# saturated engine and the session stood still for minutes. An unanswered hook is designed
+# to be harmless (the action goes through with a note, the recall is skipped), so the wait
+# is short where the person feels it and longer only where the answer carries work
+TIMEOUT_S = 30.0
+# the close reads the turn against the rules; its answer may send the agent back
+END_TIMEOUT_S = 45.0
 # the memory reads a place's files with its model before answering: longer than a recall
 ABOUT_TIMEOUT_S = 45.0
 # a hook that gates an action waits less: the person is waiting on the other side
-GATE_TIMEOUT_S = 40.0
+GATE_TIMEOUT_S = 15.0
 # asking for a code or polling it must never make a session start slow
 LOGIN_TIMEOUT_S = 10.0
 
