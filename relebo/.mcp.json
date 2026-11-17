@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "relebo": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/mcp.py"]
+    }
+  }
+}

@@ -8,6 +8,7 @@ desktop app's machine key is gone."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -24,6 +25,9 @@ PENDING_FILE = RELEBO_DIR / "device.json"
 MEMORY_DIR = RELEBO_DIR / "memory"
 LOG_FILE = MEMORY_DIR / "hooks.log"
 PLACES_FILE = MEMORY_DIR / "places.json"
+# the session each folder is in, noted by the hooks for the plugin's MCP server, which has
+# no session of its own (2026-11-17)
+SESSIONS_DIR = MEMORY_DIR / "sessions"
 # the hosted engine; a device that never installed anything of Relebo reaches this one
 DEFAULT_ENGINE = "https://api.relebo.ai"
 # which of Relebo's own clients these hooks run as: Codex sets RELEBO_CLIENT=codex
@@ -90,6 +94,23 @@ def write_json(path: Path, data: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def _session_file(cwd: str) -> Path:
+    return SESSIONS_DIR / (hashlib.sha1(cwd.encode("utf-8")).hexdigest()[:16] + ".json")
+
+
+def note_session(cwd: str, session_id: str) -> None:
+    """The session this folder is in now: what the MCP server's calls belong to."""
+    if cwd and session_id:
+        try:
+            write_json(_session_file(cwd), {"cwd": cwd, "session_id": session_id})
+        except OSError:
+            pass
+
+
+def session_for(cwd: str) -> str:
+    return str(read_json(_session_file(cwd)).get("session_id") or "") if cwd else ""
 
 
 def remove(path: Path) -> None:

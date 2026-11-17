@@ -15,11 +15,38 @@ EVENT = "UserPromptSubmit"
 LOCAL_PLACE = "On this machine, %s is at %s."
 # after a report of what the memory did: how the agent sends the detail of what looked wrong
 # to Relebo's maintainers, with this plugin's own script and this session for the trace
+SIGNALS_HEADER = "[Relebo memory · what the person's words carry, by label, in order]"
 REPORT_HEADER = "[Relebo memory · what it did with the person's last message]"
+# how the agent keeps, drops or answers a label of the memory's block: the plugin's own
+# script, with the session (2026-11-17: the agent keeps by its own call)
+KEEP_HOW = (
+    "To keep, drop or answer a label, run: python3 %s --session %s --label R1 --text "
+    '"<the memory\'s own words>" (a piece of work: --work; the person\'s yes: --confirmed; '
+    'a no or nothing to keep: --drop; their choice: --said "…"; a place: --place NAME --what '
+    '"…" --repo owner/name, repeated, and --chain "bigger > smaller"). What it prints is '
+    "what happened."
+)
 FEEDBACK_HOW = (
     "To send detail to Relebo's maintainers, run: python3 %s --session %s "
     '"<what happened, why it looks wrong, the ids>"'
 )
+# a prompt the harness writes in the person's turn and the person never typed: a subagent's
+# report handed back, a background task's notice, a message from another session. The
+# memory reads the person's words alone (2026-11-14: a subagent's route map became fourteen
+# «whose» questions in the person's Pendientes)
+NOT_THE_PERSON = (
+    "<agent-message",
+    "[Subagent hand-back]",
+    "[SYSTEM NOTIFICATION - NOT USER INPUT]",
+    "<task-notification>",
+    "<agent-notification>",
+)
+
+
+def said_by_the_person(text: str) -> bool:
+    """Whether a prompt is the person's own words, and not what the harness relayed."""
+    head = text.lstrip()[:400]
+    return not any(marker in head for marker in NOT_THE_PERSON)
 
 
 def talk(payload: dict) -> None:
@@ -29,6 +56,7 @@ def talk(payload: dict) -> None:
         _client.context("UserPromptSubmit", _login.poll(session_id))
         return
     cwd = payload.get("cwd", "")
+    _client.note_session(cwd, session_id)
     root = str(_situation.root_of(cwd))
     place = {
         "folder": _situation.folder_of(cwd),
@@ -40,6 +68,9 @@ def talk(payload: dict) -> None:
     # the person's words are never lost to the memory (2026-10-16: "el 8 descártalo")
     _unread.flush(session_id, place)
     text = payload.get("prompt") or ""
+    if not said_by_the_person(text):
+        _client.log(HOOK + " a relayed message, not the person's words: not sent")
+        return
     reply = _client.post_reply(
         "/memory/sessions/prompt", {"origin_id": session_id, "text": text, **place}
     )
@@ -63,9 +94,14 @@ def talk(payload: dict) -> None:
         if path:
             local.append(LOCAL_PLACE % (named.get("name"), path))
     parts = [answer.get("context") or ""] + local + [_check.send(session_id, cwd, answer)]
-    if REPORT_HEADER in (answer.get("context") or ""):
-        script = str(Path(__file__).resolve().parent / "feedback.py")
-        parts.append(FEEDBACK_HOW % (script, session_id))
+    context = answer.get("context") or ""
+    here = Path(__file__).resolve().parent
+    # Claude Code has the tools (the plugin's MCP server); Codex has the scripts
+    if _client.CLIENT_ID == "codex":
+        if SIGNALS_HEADER in context:
+            parts.append(KEEP_HOW % (str(here / "keep.py"), session_id))
+        if REPORT_HEADER in context:
+            parts.append(FEEDBACK_HOW % (str(here / "feedback.py"), session_id))
     _client.context("UserPromptSubmit", "\n".join(part for part in parts if part))
 
 
