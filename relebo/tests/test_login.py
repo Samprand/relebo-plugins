@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -270,6 +271,62 @@ class LoginTest(unittest.TestCase):
             clock[0] += seconds
 
         self.assertEqual(self.login.watch(max_s=10, sleeper=sleeper), "")
+
+    def test_the_wait_says_connected_when_the_watcher_keeps_the_token(self) -> None:
+        self.login.begin()
+        looks = []
+
+        def sleeper(seconds):
+            looks.append(seconds)
+            if len(looks) == 2:
+                # the watcher's own poll, in its own process
+                _Engine.state["mode"] = "approved"
+                self.assertEqual(self.login.poll(), self.login.CONNECTED)
+
+        self.assertEqual(self.login.wait(max_s=60, sleeper=sleeper), self.login.CONNECTED)
+        self.assertEqual(len(looks), 2)
+
+    def test_the_wait_is_not_fooled_by_a_token_from_before(self) -> None:
+        self.client.write_json(self.client.TOKEN_FILE, {"access_token": "old"})
+        self.login.begin(force=True)
+        clock = [1000.0]
+        self.login._now = lambda: clock[0]
+
+        def sleeper(seconds):
+            clock[0] += seconds
+
+        line = self.login.wait(max_s=5, sleeper=sleeper)
+        self.assertIn("code WDJB-MJH1 is not approved yet", line)
+        self.assertEqual(_Engine.state["polls"], 0)
+
+    def test_the_wait_says_a_refusal_a_dead_code_and_a_login_already_done(self) -> None:
+        self.login.begin()
+        _Engine.state["mode"] = "access_denied"
+        self.login.poll()
+        self.assertIn("not connected", self.login.wait(max_s=5, sleeper=lambda s: None))
+        self.login.begin(force=True)
+
+        def deny(seconds):
+            self.login.poll()
+
+        self.assertEqual(self.login.wait(max_s=60, sleeper=deny), self.login.DENIED_LINE)
+        _Engine.state["mode"] = "pending"
+        self.login.begin(force=True)
+        clock = [self.login._now()]
+        self.login._now = lambda: clock[0]
+
+        def sleeper(seconds):
+            clock[0] += 1000.0
+
+        self.assertEqual(
+            self.login.wait(max_s=5000, sleeper=sleeper),
+            self.login.EXPIRED_LINE + self.login.NEW_CODE_HINT,
+        )
+        _Engine.state["mode"] = "approved"
+        self.login._now = time.time
+        self.login.begin(force=True)
+        self.login.poll()
+        self.assertIn("connected to", self.login.wait(max_s=5, sleeper=lambda s: None))
 
     def test_a_first_session_opens_the_browser_once_and_a_later_one_only_repeats(self) -> None:
         opened = []

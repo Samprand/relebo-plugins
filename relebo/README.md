@@ -32,6 +32,8 @@ only runs without the memory.
 
 - `/relebo:login` opens your browser on the approval page with a fresh code and waits for
   you to approve (where no browser can open, it shows the code and the address instead).
+  The session says "Relebo: this device is connected as you." a few seconds after you
+  approve; it waits two minutes at most, and a later approval still connects the device.
 - `/relebo:status` says whether this device is connected and to which engine.
 - `/relebo:logout` makes the device forget its token (revoke it under Connections too).
 

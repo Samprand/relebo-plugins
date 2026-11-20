@@ -10,4 +10,10 @@ is below.
 !`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/_login.py" --connect`
 
 Repeat that line to the person verbatim: the code and the address exactly as printed, nothing
-rephrased. Do not run anything, do not poll, and never ask them to paste anything.
+rephrased. If the line names a code to approve, then run this one command, once, and nothing
+else:
+
+`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/_login.py" --wait`
+
+It returns when the person approves, or after two minutes at most. Tell the person the line
+it prints, verbatim. Do not run it again, do not poll, and never ask them to paste anything.

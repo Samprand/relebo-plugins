@@ -4,11 +4,13 @@ approves it on the web with their ordinary session; UserPromptSubmit polls once 
 and keeps the token when it arrives. From /relebo:login (`--connect`): the browser opens on
 the approval page with the code filled in, the line with the code and the address is shown
 at once (closing the page loses nothing), and a watcher left behind (`--watch`) keeps the
-token the moment the person approves; with no browser to open, the line alone does. A
+token the moment the person approves; with no browser to open, the line alone does. The
+command then waits (`--wait`) on what the watcher leaves and says the device is connected
+when it is, so the line with the code is not the last thing the person reads. A
 token the person later revokes from Connections is thrown away the moment the engine refuses
 it, and a new code is asked for right then, with the cause.
 
-Also a script: `python3 _login.py --connect | --watch | --force | --status | --poll | --logout`."""
+Also a script: `python3 _login.py --connect | --wait | --watch | --force | --status | --poll | --logout`."""
 
 from __future__ import annotations
 
@@ -43,6 +45,10 @@ TOKEN_NO_PERSON = "token_no_person"
 # the watcher /relebo:login leaves behind polls this often, for as long as the code lives
 WATCH_POLL_S = 3.0
 WATCH_MAX_S = 15 * 60.0
+# the command's own wait looks at what the watcher left this often, and gives up before the
+# two minutes a Bash call of the session is allowed by default
+WAIT_LOOK_S = 1.0
+WAIT_MAX_S = 110.0
 
 # what the person reads, one line each
 SHOW_CODE = "Relebo: to connect this device, approve code %s at %s (the code lasts %d minutes)."
@@ -53,6 +59,11 @@ OPENED = (
 WAITING = "Relebo is waiting for code %s at %s"
 CONNECTED = "Relebo: this device is connected as you."
 EXPIRED_LINE = "Relebo: the code expired. "
+NEW_CODE_HINT = "Type /relebo:login for a new one."
+STILL_WAITING = (
+    "Relebo: code %s is not approved yet at %s. Once approved, this device is connected by "
+    "itself; /relebo:status says where it stands."
+)
 SPENT_LINE = "Relebo: that code was already used. "
 CODE_REFUSED_LINE = "Relebo: could not get a login code from %s (%s). Type /relebo:login to retry."
 DENIED_LINE = "Relebo: access denied. Type /relebo:login if that was a mistake"
@@ -275,6 +286,32 @@ def watch(max_s: float = WATCH_MAX_S, sleeper=time.sleep) -> str:
     return ""
 
 
+def wait(max_s: float = WAIT_MAX_S, sleeper=time.sleep) -> str:
+    """What /relebo:login says after its line with the code: it looks at what the watcher
+    leaves until the code is decided, and returns the line for the person. It never polls the
+    engine itself: two askers of one code would have one of them read it as already spent. A
+    token from before proves nothing, so the sign is the code leaving its file."""
+    waiting = pending()
+    if not waiting:
+        # decided before the wait began, or no code was ever handed out
+        return status()
+    where = waiting.get("verification_uri_complete") or waiting.get("verification_uri")
+    deadline = _now() + max_s
+    while _now() < deadline:
+        found = _client.read_json(_client.PENDING_FILE)
+        if found.get("denied_at"):
+            # the watcher has no session, so the refusal is known by its instant
+            return DENIED_LINE
+        if found.get("device_code") != waiting.get("device_code"):
+            if not found.get("device_code") and _client.identified():
+                return CONNECTED
+            return status()
+        if not pending():
+            return EXPIRED_LINE + NEW_CODE_HINT
+        sleeper(WAIT_LOOK_S)
+    return STILL_WAITING % (waiting.get("user_code"), where)
+
+
 def refused(reply: _client.Reply) -> bool:
     """Whether the engine turned the token itself away, as opposed to failing the call."""
     return reply.status == 401 and reply.error_code in TOKEN_REFUSALS + (TOKEN_NO_PERSON,)
@@ -381,6 +418,8 @@ def main(argv: list) -> int:
         print(poll() or status())
     elif "--connect" in argv:
         print(connect())
+    elif "--wait" in argv:
+        print(wait())
     elif "--watch" in argv:
         watch()
     else:
