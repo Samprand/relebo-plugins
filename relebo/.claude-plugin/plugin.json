@@ -1,7 +1,7 @@
 {
   "name": "relebo",
   "displayName": "Relebo",
-  "version": "0.33.1",
+  "version": "0.33.5",
   "description": "Relebo's memory from Claude Code: what your places remember, kept and recalled through the Relebo engine.",
   "author": {
     "name": "Samprand"

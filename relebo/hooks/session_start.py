@@ -15,6 +15,11 @@ FEEDBACK_HOW = (
     "To send detail to Relebo's maintainers when the memory did something wrong, run: "
     'python3 %s --session %s "<what happened, why it looks wrong, the ids>"'
 )
+WORK_HOW = (
+    "The person's work in Relebo (their workspaces and teams, the workflows of each, starting "
+    "one, a one-off plan, following a run) is reached with: python3 %s  — alone it lists the "
+    "tools and what each takes; with a tool's name and its input as JSON it calls one."
+)
 import _login
 import _places
 import _situation
@@ -60,6 +65,7 @@ def arrive(payload: dict) -> None:
         parts += [
             SEARCH_HOW % (str(here / "search.py"), session_id),
             FEEDBACK_HOW % (str(here / "feedback.py"), session_id),
+            WORK_HOW % str(here / "work.py"),
         ]
     _client.context("SessionStart", "\n".join(part for part in parts if part))
 

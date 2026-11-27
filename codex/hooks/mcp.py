@@ -4,8 +4,11 @@ local MCP server over stdio, with no dependency beyond Python, that hands the ag
 this device's token. The session the calls belong to is the one the hooks noted for this
 folder (user_prompt and session_start write it), so a label of the turn is found.
 
+Beside them go the person's work tools (2026-11-20): their workspaces, workflows and runs.
+Those are the engine's own list, asked for when the tools are listed, never copied here.
+
 Claude Code starts it from the plugin's .mcp.json; Codex keeps the scripts (keep.py,
-search.py, feedback.py) until its plugins carry MCP servers too.
+search.py, feedback.py, work.py) until its plugins carry MCP servers too.
 """
 
 import json
@@ -16,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _client
+import _work
 
 PROTOCOL = "2025-06-18"
 SERVER = {"name": "relebo", "version": _client.version()}
@@ -144,7 +148,8 @@ def call(name: str, arguments: dict, cwd: str) -> str:
         }
         path = "/memory/sessions/feedback"
     else:
-        return "unknown tool: " + name
+        # not one of the memory's: the engine knows whether it is a work tool
+        return _work.call(name, arguments)
     reply = _client.post_reply(path, body, timeout=_client.TIMEOUT_S)
     if not reply.ok:
         _client.log("mcp " + name + " refused: " + str(reply.status))
@@ -165,7 +170,17 @@ def answer(request: dict, cwd: str):
             "serverInfo": SERVER,
         }
     elif method == "tools/list":
-        result = {"tools": TOOLS}
+        result = {
+            "tools": TOOLS
+            + [
+                {
+                    "name": tool["name"],
+                    "description": str(tool.get("description") or ""),
+                    "inputSchema": tool.get("input_schema") or {"type": "object"},
+                }
+                for tool in _work.tools()
+            ]
+        }
     elif method == "tools/call":
         params = request.get("params") or {}
         text = call(str(params.get("name") or ""), params.get("arguments") or {}, cwd)

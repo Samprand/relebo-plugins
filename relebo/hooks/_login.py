@@ -29,7 +29,10 @@ import _client
 
 DEVICE_CODE_PATH = "/auth/device/code"
 DEVICE_TOKEN_PATH = "/auth/device/token"
-SCOPE = "memory"
+# the memory, and the person's work (workspaces, workflows, runs): what a sign-in asks for
+MEMORY_SCOPE = "memory"
+SCOPE = MEMORY_SCOPE + " work"
+INVALID_SCOPE = "invalid_scope"
 
 # OAuth answers while the person has not decided (RFC 8628 §3.5)
 PENDING = "authorization_pending"
@@ -137,11 +140,14 @@ def begin(force: bool = False, session_id: str = "") -> str:
         )
     if not force and session_id and denied_in(session_id):
         return ""
-    reply = _client.post_reply(
-        DEVICE_CODE_PATH,
-        {"client_id": _client.CLIENT_ID, "scope": SCOPE, "host_name": platform.node()},
-        timeout=_client.LOGIN_TIMEOUT_S,
-    )
+    asked = {"client_id": _client.CLIENT_ID, "scope": SCOPE, "host_name": platform.node()}
+    reply = _client.post_reply(DEVICE_CODE_PATH, asked, timeout=_client.LOGIN_TIMEOUT_S)
+    if reply.error_code == INVALID_SCOPE:
+        # an engine from before the work tools knows the memory alone: sign in to that, and
+        # the work tools tell the person to sign in again once the engine has them
+        reply = _client.post_reply(
+            DEVICE_CODE_PATH, {**asked, "scope": MEMORY_SCOPE}, timeout=_client.LOGIN_TIMEOUT_S
+        )
     if not reply.ok:
         if reply.status == 0:
             return UNREACHED_LINE % _client.engine_url()

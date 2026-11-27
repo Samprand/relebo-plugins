@@ -17,7 +17,12 @@ import mcp  # noqa: E402
 class McpTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.saved = (_client.SESSIONS_DIR, _client.identified, _client.post_reply)
+        self.saved = (
+            _client.SESSIONS_DIR,
+            _client.identified,
+            _client.post_reply,
+            _client.get_reply,
+        )
         _client.SESSIONS_DIR = Path(self.tmp.name) / "sessions"
         _client.identified = lambda: True
         self.sent = []
@@ -27,9 +32,16 @@ class McpTest(unittest.TestCase):
             return _client.Reply(200, {"context": "guardada (hecho): x"})
 
         _client.post_reply = post
+        self.work_tools = _client.Reply(0, None)
+        _client.get_reply = lambda path, timeout=0: self.work_tools
 
     def tearDown(self) -> None:
-        _client.SESSIONS_DIR, _client.identified, _client.post_reply = self.saved
+        (
+            _client.SESSIONS_DIR,
+            _client.identified,
+            _client.post_reply,
+            _client.get_reply,
+        ) = self.saved
         self.tmp.cleanup()
 
     def rpc(self, requests: list, cwd: str = "/work/relebo") -> list:
@@ -117,6 +129,56 @@ class McpTest(unittest.TestCase):
         )
         assert [p for p, _ in self.sent] == ["/memory/search", "/memory/sessions/feedback"]
         assert self.sent[0][1]["query"] == "mpr" and self.sent[1][1]["memory_ids"] == [5]
+
+    def test_the_engines_work_tools_are_listed_beside_the_memorys(self) -> None:
+        schema = {"type": "object", "properties": {"workspace_id": {"type": "integer"}}}
+        self.work_tools = _client.Reply(
+            200,
+            {"tools": [{"name": "list_workflows", "description": "d", "input_schema": schema}]},
+        )
+        [listed] = self.rpc([{"jsonrpc": "2.0", "id": 8, "method": "tools/list"}])
+        assert listed["result"]["tools"][3] == {
+            "name": "list_workflows",
+            "description": "d",
+            "inputSchema": schema,
+        }
+
+    def test_a_work_tool_is_carried_to_the_engine_and_answers_its_json(self) -> None:
+        _client.post_reply = lambda path, body, timeout=0: (
+            self.sent.append((path, body)) or _client.Reply(200, {"run_id": 9})
+        )
+        [reply] = self.rpc(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "start_workflow",
+                        "arguments": {"workspace_id": 2, "key": "seo"},
+                    },
+                }
+            ]
+        )
+        assert self.sent == [
+            ("/work/tools/start_workflow", {"arguments": {"workspace_id": 2, "key": "seo"}})
+        ]
+        assert json.loads(reply["result"]["content"][0]["text"]) == {"run_id": 9}
+
+    def test_a_token_of_the_memory_alone_is_told_to_sign_in_again(self) -> None:
+        refused = {"detail": {"code": "scope_missing", "message": "no", "scope": "work"}}
+        _client.post_reply = lambda path, body, timeout=0: _client.Reply(403, refused)
+        [reply] = self.rpc(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "tools/call",
+                    "params": {"name": "list_workspaces", "arguments": {}},
+                }
+            ]
+        )
+        assert "/relebo:login" in reply["result"]["content"][0]["text"]
 
     def test_an_unknown_method_is_an_error_and_a_notification_is_silent(self) -> None:
         [reply] = self.rpc(
